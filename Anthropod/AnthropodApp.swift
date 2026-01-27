@@ -12,7 +12,7 @@ import SwiftData
 struct AnthropodApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Message.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -25,8 +25,13 @@ struct AnthropodApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ChatView()
         }
         .modelContainer(sharedModelContainer)
+        .windowStyle(.automatic)
+        .defaultSize(
+            width: LiquidGlass.Window.defaultWidth,
+            height: LiquidGlass.Window.defaultHeight
+        )
     }
 }
