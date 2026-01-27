@@ -173,7 +173,7 @@ actor GatewayClient {
         let locale = Locale.preferredLanguages.first ?? Locale.current.identifier
 
         let client: [String: Any] = [
-            "id": "anthropod-macos",
+            "id": "moltbot-macos",
             "displayName": Host.current().localizedName ?? "Anthropod",
             "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0",
             "platform": platform,
