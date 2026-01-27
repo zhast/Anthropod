@@ -22,13 +22,34 @@ struct ChatView: View {
 
             // Navigation layer (glass - floats above content)
             inputBar
+
+            // Connection status overlay
+            if viewModel.isConnecting {
+                connectionOverlay
+            }
         }
         .frame(
             minWidth: LiquidGlass.Window.minWidth,
             minHeight: LiquidGlass.Window.minHeight
         )
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                connectionStatusIndicator
+            }
+        }
         .onAppear {
             viewModel.configure(with: modelContext)
+            Task {
+                await viewModel.connectToGateway()
+            }
+        }
+        .alert("Error", isPresented: .init(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.clearError() } }
+        )) {
+            Button("OK") { viewModel.clearError() }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
         }
     }
 
@@ -90,9 +111,46 @@ struct ChatView: View {
             Text("Start a conversation")
                 .font(.title3)
                 .foregroundStyle(.secondary)
+
+            if !viewModel.isConnected && !viewModel.isConnecting {
+                Button("Connect to Gateway") {
+                    Task {
+                        await viewModel.connectToGateway()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.top, LiquidGlass.Spacing.sm)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.top, 100)
+    }
+
+    // MARK: - Connection Status
+
+    private var connectionStatusIndicator: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(viewModel.isConnected ? Color.green : Color.orange)
+                .frame(width: 8, height: 8)
+
+            Text(viewModel.isConnected ? "Connected" : "Disconnected")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var connectionOverlay: some View {
+        VStack(spacing: LiquidGlass.Spacing.md) {
+            ProgressView()
+                .scaleEffect(1.2)
+
+            Text("Connecting to gateway...")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.ultraThinMaterial)
     }
 }
 
@@ -146,6 +204,11 @@ struct ChatViewWithVoice: View {
             }
             .padding(.horizontal, LiquidGlass.Spacing.inputBarHorizontal)
             .padding(.bottom, LiquidGlass.Spacing.inputBarBottom)
+
+            // Connection overlay
+            if viewModel.isConnecting {
+                connectionOverlay
+            }
         }
         .frame(
             minWidth: LiquidGlass.Window.minWidth,
@@ -153,6 +216,9 @@ struct ChatViewWithVoice: View {
         )
         .onAppear {
             viewModel.configure(with: modelContext)
+            Task {
+                await viewModel.connectToGateway()
+            }
         }
     }
 
@@ -165,9 +231,32 @@ struct ChatViewWithVoice: View {
             Text("Start a conversation")
                 .font(.title3)
                 .foregroundStyle(.secondary)
+
+            if !viewModel.isConnected && !viewModel.isConnecting {
+                Button("Connect to Gateway") {
+                    Task {
+                        await viewModel.connectToGateway()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.top, LiquidGlass.Spacing.sm)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.top, 100)
+    }
+
+    private var connectionOverlay: some View {
+        VStack(spacing: LiquidGlass.Spacing.md) {
+            ProgressView()
+                .scaleEffect(1.2)
+
+            Text("Connecting to gateway...")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.ultraThinMaterial)
     }
 }
 

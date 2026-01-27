@@ -17,13 +17,22 @@ final class ChatViewModel {
     var isLoading: Bool = false
     var isListening: Bool = false
     var errorMessage: String?
+    var isConnected: Bool = false
+    var isConnecting: Bool = false
 
     /// Current session for message grouping
     var currentSessionId: UUID = UUID()
 
+    /// Current run ID for streaming response
+    private var currentRunId: String?
+
+    /// Current assistant message being streamed
+    private var currentAssistantMessage: Message?
+
     // MARK: - Dependencies
 
     private var modelContext: ModelContext?
+    private let gateway = GatewayService.shared
 
     // MARK: - Initialization
 
@@ -31,6 +40,20 @@ final class ChatViewModel {
 
     func configure(with modelContext: ModelContext) {
         self.modelContext = modelContext
+        setupEventHandlers()
+    }
+
+    // MARK: - Connection
+
+    func connectToGateway() async {
+        isConnecting = true
+        await gateway.connect()
+        isConnected = gateway.isConnected
+        isConnecting = false
+
+        if let error = gateway.connectionError {
+            errorMessage = error
+        }
     }
 
     // MARK: - Actions
@@ -50,22 +73,20 @@ final class ChatViewModel {
         // Create placeholder for assistant response
         let assistantMessage = Message.assistant("", sessionId: currentSessionId, isStreaming: true)
         modelContext.insert(assistantMessage)
+        currentAssistantMessage = assistantMessage
 
         // Set loading state
         isLoading = true
         errorMessage = nil
 
-        // TODO: Connect to gateway WebSocket for actual AI response
-        // For now, simulate a response after a delay
+        // Send to gateway
         Task {
-            try? await Task.sleep(for: .seconds(1))
-            await simulateResponse(for: assistantMessage, userContent: content)
+            await sendToGateway(message: content, assistantMessage: assistantMessage)
         }
     }
 
     func toggleVoice() {
         isListening.toggle()
-        // TODO: Implement voice input
     }
 
     func clearError() {
@@ -74,25 +95,72 @@ final class ChatViewModel {
 
     func startNewSession() {
         currentSessionId = UUID()
+        currentRunId = nil
+        currentAssistantMessage = nil
+    }
+
+    func abortCurrentRun() async {
+        guard let runId = currentRunId else { return }
+
+        do {
+            _ = try await gateway.chatAbort(runId: runId)
+            currentAssistantMessage?.isStreaming = false
+            isLoading = false
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     // MARK: - Private
 
-    private func simulateResponse(for message: Message, userContent: String) async {
-        // Simulate streaming response
-        let responses = [
-            "I understand you said: \"\(userContent)\"",
-            "\n\nThis is a demo response from the Anthropod app.",
-            " The actual AI integration will connect to the gateway WebSocket."
-        ]
+    private func setupEventHandlers() {
+        gateway.onAgentRun { [weak self] event in
+            Task { @MainActor in
+                self?.handleAgentRunEvent(event)
+            }
+        }
+    }
 
-        for (index, chunk) in responses.enumerated() {
-            try? await Task.sleep(for: .milliseconds(300))
-            message.content += chunk
+    private func sendToGateway(message: String, assistantMessage: Message) async {
+        // Connect if needed
+        if !gateway.isConnected {
+            await connectToGateway()
+        }
 
-            if index == responses.count - 1 {
-                message.isStreaming = false
-                isLoading = false
+        guard gateway.isConnected else {
+            assistantMessage.content = "Unable to connect to gateway. Please check that Moltbot is running."
+            assistantMessage.isStreaming = false
+            isLoading = false
+            return
+        }
+
+        do {
+            let runId = try await gateway.chatSend(message: message)
+            currentRunId = runId
+        } catch {
+            assistantMessage.content = "Error: \(error.localizedDescription)"
+            assistantMessage.isStreaming = false
+            isLoading = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func handleAgentRunEvent(_ event: AgentRunEvent) {
+        guard let assistantMessage = currentAssistantMessage else { return }
+
+        // Update content if provided
+        if let content = event.content {
+            assistantMessage.content = content
+        }
+
+        // Check if complete
+        if event.isComplete {
+            assistantMessage.isStreaming = false
+            isLoading = false
+            currentRunId = nil
+
+            if let error = event.error {
+                errorMessage = error
             }
         }
     }
