@@ -11,13 +11,11 @@ import Charts
 
 struct SettingsView: View {
     @State private var model = SettingsViewModel()
+    @State private var workspaceDocSelection = "AGENTS.md"
 
     @AppStorage(AnthropodDefaults.compactLayout) private var compactLayout = false
     @AppStorage(AnthropodDefaults.compactMaxLines) private var compactMaxLines = 400
     @AppStorage(AnthropodDefaults.preferredModelId) private var preferredModelId = ""
-
-    @State private var isConfigUnlocked = false
-    @State private var isAgentsUnlocked = false
 
     var body: some View {
         TabView {
@@ -35,6 +33,9 @@ struct SettingsView: View {
             }
             Tab("Files", systemImage: "doc.text") {
                 configPane
+            }
+            Tab("Docs", systemImage: "doc.richtext") {
+                docsPane
             }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -175,34 +176,72 @@ struct SettingsView: View {
 
     private var configPane: some View {
         Form {
-            Section("Config Files") {
-                ConfigFileEditor(
-                    title: "Config",
-                    subtitle: model.configPath,
-                    text: $model.configText,
-                    isUnlocked: $isConfigUnlocked,
-                    isLoading: model.isLoadingConfig,
-                    error: model.configError,
-                    hasChanges: model.configText != model.configOriginalText,
-                    onReload: { Task { await model.loadConfigFile() } },
-                    onSave: { Task { await model.saveConfigFile() } }
+            Section("Config") {
+                ConfigUIEditor(
+                    draft: model.configDraft,
+                    error: model.configDraftError,
+                    hasChanges: model.configDraftHasChanges,
+                    onUpdate: { updated in
+                        model.updateConfigDraft { $0 = updated }
+                    },
+                    onSave: { Task { await model.saveConfigFile() } },
+                    onRevert: { model.revertConfigEdits() }
                 )
-                ConfigFileEditor(
-                    title: "Agents",
-                    subtitle: model.agentsPath,
-                    text: $model.agentsText,
-                    isUnlocked: $isAgentsUnlocked,
-                    isLoading: model.isLoadingAgents,
-                    error: model.agentsError,
-                    hasChanges: model.agentsText != model.agentsOriginalText,
-                    onReload: { Task { await model.loadAgentsFile() } },
-                    onSave: { Task { await model.saveAgentsFile() } }
-                )
+                DisclosureGroup("Raw Config") {
+                    ConfigFileEditor(
+                        title: "Config",
+                        subtitle: model.configPath,
+                        text: $model.configText,
+                        isLoading: model.isLoadingConfig,
+                        error: model.configError,
+                        hasChanges: model.configText != model.configOriginalText,
+                        onFormat: {
+                            model.formatConfigJson()
+                        },
+                        onReload: { Task { await model.loadConfigFile() } },
+                        onRevert: { model.revertConfigEdits() },
+                        onSave: { Task { await model.saveConfigFile() } }
+                    )
+                }
+                .padding(.top, 4)
             }
         }
         .formStyle(.grouped)
         .task {
             await model.refreshConfigFiles()
+        }
+    }
+
+    private var docsPane: some View {
+        VStack(spacing: 12) {
+            DocSegmentedPicker(selection: $workspaceDocSelection, docs: workspaceDocs)
+                .padding(.horizontal)
+                .padding(.top, 8)
+
+            Form {
+                Section {
+                    ConfigFileEditor(
+                        title: selectedWorkspaceDoc?.title ?? "Workspace Doc",
+                        subtitle: model.workspaceDocPath,
+                        text: $model.workspaceDocText,
+                        isLoading: model.isLoadingWorkspaceDoc,
+                        error: model.workspaceDocError,
+                        hasChanges: model.workspaceDocText != model.workspaceDocOriginalText,
+                        onFormat: nil,
+                        onReload: { Task { await model.loadWorkspaceDoc(relativePath: workspaceDocSelection) } },
+                        onRevert: { model.revertWorkspaceDocEdits() },
+                        onSave: { Task { await model.saveWorkspaceDoc(relativePath: workspaceDocSelection) } }
+                    )
+                }
+            }
+            .formStyle(.grouped)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .task {
+            await model.loadWorkspaceDoc(relativePath: workspaceDocSelection)
+        }
+        .onChange(of: workspaceDocSelection) { _, newValue in
+            Task { await model.loadWorkspaceDoc(relativePath: newValue) }
         }
     }
 
@@ -260,6 +299,293 @@ struct SettingsView: View {
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
+
+    private var selectedWorkspaceDoc: WorkspaceDocSpec? {
+        workspaceDocs.first { $0.relativePath == workspaceDocSelection }
+    }
+
+    private var workspaceDocs: [WorkspaceDocSpec] {
+        let today = Date()
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today) ?? today
+        let todayString = Self.memoryDateFormatter.string(from: today)
+        let yesterdayString = Self.memoryDateFormatter.string(from: yesterday)
+        return [
+            WorkspaceDocSpec(title: "AGENTS.md", toolbarTitle: "Agents", relativePath: "AGENTS.md"),
+            WorkspaceDocSpec(title: "SOUL.md", toolbarTitle: "Soul", relativePath: "SOUL.md"),
+            WorkspaceDocSpec(title: "USER.md", toolbarTitle: "User", relativePath: "USER.md"),
+            WorkspaceDocSpec(title: "MEMORY.md", toolbarTitle: "Memory", relativePath: "MEMORY.md"),
+            WorkspaceDocSpec(title: "HEARTBEAT.md", toolbarTitle: "Heartbeat", relativePath: "HEARTBEAT.md"),
+            WorkspaceDocSpec(title: "TOOLS.md", toolbarTitle: "Tools", relativePath: "TOOLS.md"),
+            WorkspaceDocSpec(title: "IDENTITY.md", toolbarTitle: "Identity", relativePath: "IDENTITY.md"),
+            WorkspaceDocSpec(title: "BOOTSTRAP.md", toolbarTitle: "Bootstrap", relativePath: "BOOTSTRAP.md"),
+            WorkspaceDocSpec(
+                title: "Memory (Today \(todayString))",
+                toolbarTitle: "Today",
+                relativePath: "memory/\(todayString).md"
+            ),
+            WorkspaceDocSpec(
+                title: "Memory (Yesterday \(yesterdayString))",
+                toolbarTitle: "Yesterday",
+                relativePath: "memory/\(yesterdayString).md"
+            )
+        ]
+    }
+
+    private static let memoryDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+}
+
+private struct WorkspaceDocSpec: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let toolbarTitle: String
+    let relativePath: String
+
+    init(title: String, toolbarTitle: String, relativePath: String) {
+        self.id = relativePath
+        self.title = title
+        self.toolbarTitle = toolbarTitle
+        self.relativePath = relativePath
+    }
+}
+
+private struct DocSegmentedPicker: View {
+    @Binding var selection: String
+    let docs: [WorkspaceDocSpec]
+
+    var body: some View {
+        let firstRow = docs.prefix(5)
+        let secondRow = docs.dropFirst(5)
+
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("Workspace Docs", selection: $selection) {
+                ForEach(Array(firstRow)) { doc in
+                    Text(doc.toolbarTitle).tag(doc.relativePath)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            if !secondRow.isEmpty {
+                Picker("More Docs", selection: $selection) {
+                    ForEach(Array(secondRow)) { doc in
+                        Text(doc.toolbarTitle).tag(doc.relativePath)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+        }
+    }
+}
+
+private struct ConfigUIEditor: View {
+    let draft: SettingsViewModel.ConfigDraft?
+    let error: String?
+    let hasChanges: Bool
+    let onUpdate: (SettingsViewModel.ConfigDraft) -> Void
+    let onSave: () -> Void
+    let onRevert: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let error, !error.isEmpty {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let draft {
+                HStack(spacing: 12) {
+                    Button("Save") {
+                        onSave()
+                    }
+                    .disabled(!hasChanges)
+                    Button("Revert") {
+                        onRevert()
+                    }
+                    .disabled(!hasChanges)
+                }
+
+                Group {
+                    Toggle("Enable browser", isOn: binding(draft, keyPath: \.browserEnabled))
+
+                    LabeledContent("Workspace") {
+                        TextField("Path", text: binding(draft, keyPath: \.workspace))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 360)
+                    }
+
+                    LabeledContent("Max concurrent") {
+                        TextField("Max", text: maxConcurrentBinding(draft))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                    }
+                }
+
+                Divider()
+
+                Group {
+                    LabeledContent("Primary model") {
+                        if draft.modelChoices.isEmpty {
+                            TextField("Model id", text: binding(draft, keyPath: \.modelPrimary))
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 320)
+                        } else {
+                            Picker("Primary", selection: binding(draft, keyPath: \.modelPrimary)) {
+                                ForEach(primaryOptions(for: draft), id: \.self) { model in
+                                    Text(model).tag(model)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Fallbacks")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if draft.modelFallbacks.isEmpty {
+                            Text("None")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(draft.modelFallbacks, id: \.self) { fallback in
+                                HStack {
+                                    Text(fallback)
+                                        .font(.caption)
+                                    Spacer()
+                                    Button {
+                                        removeFallback(fallback, from: draft)
+                                    } label: {
+                                        Image(systemName: "minus.circle")
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        Menu("Add fallback") {
+                            ForEach(fallbackOptions(for: draft), id: \.self) { model in
+                                Button(model) {
+                                    addFallback(model, to: draft)
+                                }
+                            }
+                        }
+                        .disabled(fallbackOptions(for: draft).isEmpty)
+                    }
+                }
+
+                Divider()
+
+                Group {
+                    LabeledContent("Context pruning") {
+                        TextField("Mode", text: binding(draft, keyPath: \.contextPruningMode))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 200)
+                    }
+                    LabeledContent("Pruning TTL") {
+                        TextField("TTL", text: binding(draft, keyPath: \.contextPruningTtl))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 120)
+                    }
+                    LabeledContent("Compaction") {
+                        TextField("Mode", text: binding(draft, keyPath: \.compactionMode))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 200)
+                    }
+                    LabeledContent("Heartbeat") {
+                        TextField("Every", text: binding(draft, keyPath: \.heartbeatEvery))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 120)
+                    }
+                }
+
+                if !draft.authProfiles.isEmpty {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Auth profiles")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(draft.authProfiles, id: \.id) { profile in
+                            HStack {
+                                Text(profile.id)
+                                    .font(.caption)
+                                Spacer()
+                                Text(profile.mode ?? "unknown")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("Config UI unavailable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func binding<T>(
+        _ draft: SettingsViewModel.ConfigDraft,
+        keyPath: WritableKeyPath<SettingsViewModel.ConfigDraft, T>
+    ) -> Binding<T> {
+        Binding(
+            get: { draft[keyPath: keyPath] },
+            set: { newValue in
+                var copy = draft
+                copy[keyPath: keyPath] = newValue
+                onUpdate(copy)
+            }
+        )
+    }
+
+    private func maxConcurrentBinding(_ draft: SettingsViewModel.ConfigDraft) -> Binding<String> {
+        Binding(
+            get: { draft.maxConcurrent.map(String.init) ?? "" },
+            set: { newValue in
+                var copy = draft
+                if let value = Int(newValue) {
+                    copy.maxConcurrent = value
+                } else {
+                    copy.maxConcurrent = nil
+                }
+                onUpdate(copy)
+            }
+        )
+    }
+
+    private func primaryOptions(for draft: SettingsViewModel.ConfigDraft) -> [String] {
+        var options = draft.modelChoices
+        if !draft.modelPrimary.isEmpty && !options.contains(draft.modelPrimary) {
+            options.insert(draft.modelPrimary, at: 0)
+        }
+        return options
+    }
+
+    private func fallbackOptions(for draft: SettingsViewModel.ConfigDraft) -> [String] {
+        let used = Set(draft.modelFallbacks + [draft.modelPrimary])
+        return draft.modelChoices.filter { !used.contains($0) }
+    }
+
+    private func removeFallback(_ fallback: String, from draft: SettingsViewModel.ConfigDraft) {
+        var copy = draft
+        copy.modelFallbacks.removeAll { $0 == fallback }
+        onUpdate(copy)
+    }
+
+    private func addFallback(_ fallback: String, to draft: SettingsViewModel.ConfigDraft) {
+        var copy = draft
+        if !copy.modelFallbacks.contains(fallback) {
+            copy.modelFallbacks.append(fallback)
+        }
+        onUpdate(copy)
     }
 }
 
@@ -452,11 +778,12 @@ private struct ConfigFileEditor: View {
     let title: String
     let subtitle: String?
     @Binding var text: String
-    @Binding var isUnlocked: Bool
     let isLoading: Bool
     let error: String?
     let hasChanges: Bool
+    let onFormat: (() -> Void)?
     let onReload: () -> Void
+    let onRevert: () -> Void
     let onSave: () -> Void
 
     var body: some View {
@@ -471,19 +798,11 @@ private struct ConfigFileEditor: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                Spacer()
-                Button {
-                    isUnlocked.toggle()
-                } label: {
-                    Label(isUnlocked ? "Lock" : "Unlock", systemImage: isUnlocked ? "lock.open" : "lock")
-                }
-                .buttonStyle(.bordered)
             }
 
             TextEditor(text: $text)
                 .font(.system(.body, design: .monospaced))
                 .frame(minHeight: 180)
-                .disabled(!isUnlocked)
                 .textSelection(.enabled)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -491,14 +810,24 @@ private struct ConfigFileEditor: View {
                 )
 
             HStack(spacing: 12) {
+                if let onFormat {
+                    Button("Format JSON") {
+                        onFormat()
+                    }
+                    .disabled(isLoading)
+                }
                 Button("Reload") {
                     onReload()
                 }
                 .disabled(isLoading)
+                Button("Revert") {
+                    onRevert()
+                }
+                .disabled(!hasChanges || isLoading)
                 Button("Save") {
                     onSave()
                 }
-                .disabled(!isUnlocked || !hasChanges || isLoading)
+                .disabled(!hasChanges || isLoading)
                 Spacer()
                 if let error, !error.isEmpty {
                     Text(error)
