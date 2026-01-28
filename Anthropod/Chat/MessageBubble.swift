@@ -11,46 +11,26 @@ import Combine
 struct MessageBubble: View {
     let message: Message
 
-    /// Whether to show timestamp on hover
-    @State private var isHovered = false
-
     var body: some View {
         HStack(alignment: .bottom, spacing: LiquidGlass.Spacing.xs) {
             if message.isFromUser {
                 Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
             }
-
-            VStack(alignment: message.isFromUser ? .trailing : .leading, spacing: LiquidGlass.Spacing.xxs) {
-                // Message content
-                Text(message.content)
-                    .font(LiquidGlass.Typography.messageBody)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, LiquidGlass.Spacing.md)
-                    .padding(.vertical, LiquidGlass.Spacing.sm)
-                    .background(bubbleBackground)
-                    .clipShape(
-                        RoundedRectangle(
-                            cornerRadius: LiquidGlass.CornerRadius.bubble,
-                            style: .continuous
-                        )
+            Text(message.content)
+                .font(LiquidGlass.Typography.messageBody)
+                .textSelection(.enabled)
+                .padding(.horizontal, LiquidGlass.Spacing.md)
+                .padding(.vertical, LiquidGlass.Spacing.sm)
+                .background(bubbleBackground)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: LiquidGlass.CornerRadius.bubble,
+                        style: .continuous
                     )
-
-                // Timestamp (shown on hover)
-                if isHovered {
-                    Text(message.timestamp, style: .time)
-                        .font(LiquidGlass.Typography.timestamp)
-                        .foregroundStyle(LiquidGlass.Colors.secondaryText)
-                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                }
-            }
+                )
 
             if !message.isFromUser {
                 Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
-            }
-        }
-        .onHover { hovering in
-            withAnimation(LiquidGlass.Animation.quick) {
-                isHovered = hovering
             }
         }
     }
@@ -110,6 +90,50 @@ struct AssistantMessageBubble: View {
                     MessageBubble(message: message)
                 }
             }
+
+            Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
+        }
+    }
+}
+
+// MARK: - Streaming Bubbles (Non-persisted)
+
+struct StreamingAssistantBubble: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: LiquidGlass.Spacing.xs) {
+            Text(text)
+                .font(LiquidGlass.Typography.messageBody)
+                .textSelection(.enabled)
+                .padding(.horizontal, LiquidGlass.Spacing.md)
+                .padding(.vertical, LiquidGlass.Spacing.sm)
+                .background(LiquidGlass.Colors.assistantBubble)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: LiquidGlass.CornerRadius.bubble,
+                        style: .continuous
+                    )
+                )
+
+            Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
+        }
+    }
+}
+
+struct StreamingTypingBubble: View {
+    var body: some View {
+        HStack(alignment: .bottom, spacing: LiquidGlass.Spacing.xs) {
+            StreamingIndicator()
+                .padding(.horizontal, LiquidGlass.Spacing.md)
+                .padding(.vertical, LiquidGlass.Spacing.sm)
+                .background(LiquidGlass.Colors.assistantBubble)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: LiquidGlass.CornerRadius.bubble,
+                        style: .continuous
+                    )
+                )
 
             Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
         }

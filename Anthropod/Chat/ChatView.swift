@@ -18,6 +18,7 @@ struct ChatView: View {
     @State private var showDebugOverlay = false
     @State private var debugReport = ""
     @State private var didCopyDebug = false
+    @State private var expandedGroupIds: Set<UUID> = []
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -85,14 +86,30 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(spacing: LiquidGlass.Spacing.messagePadding) {
                     // Empty state
-                    if messages.isEmpty {
+                    if sessionMessages.isEmpty {
                         emptyState
                     }
 
                     // Messages
-                    ForEach(messages) { message in
-                        MessageBubble(message: message)
-                            .id(message.id)
+                    ForEach(messageRows) { row in
+                        switch row.kind {
+                        case let .divider(date):
+                            DateDivider(date: date)
+                        case let .group(group):
+                            MessageGroupView(
+                                group: group,
+                                isExpanded: expandedGroupIds.contains(group.id),
+                                onToggle: { toggleGroup(group.id) }
+                            )
+                        }
+                    }
+
+                    if hasStreamingText, let text = viewModel.streamingAssistantText {
+                        StreamingAssistantBubble(text: text)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if viewModel.isLoading {
+                        StreamingTypingBubble()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     // Scroll anchor
@@ -105,12 +122,174 @@ struct ChatView: View {
                 .padding(.bottom, LiquidGlass.Spacing.scrollBottomInset)
             }
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: messages.count) { _, _ in
+            .onChange(of: sessionMessages.count) { _, _ in
                 withAnimation(LiquidGlass.Animation.spring) {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
         }
+    }
+
+    private var sessionMessages: [Message] {
+        let filtered = messages.filter { $0.sessionId == viewModel.currentSessionId }
+        return filtered.sorted {
+            if let lhs = $0.sortIndex, let rhs = $1.sortIndex, lhs != rhs {
+                return lhs < rhs
+            }
+            if $0.sortIndex != nil, $1.sortIndex == nil { return true }
+            if $0.sortIndex == nil, $1.sortIndex != nil { return false }
+            if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+    }
+
+    private var messageRows: [MessageRow] {
+        guard !sessionMessages.isEmpty else { return [] }
+        var rows: [MessageRow] = []
+        let calendar = Calendar.current
+        var currentDay: Date?
+        var currentGroup: MessageGroup?
+
+        for message in sessionMessages {
+            let day = calendar.startOfDay(for: message.timestamp)
+            if let dayValue = currentDay, !calendar.isDate(day, inSameDayAs: dayValue) {
+                if let group = currentGroup {
+                    rows.append(MessageRow(kind: .group(group)))
+                    currentGroup = nil
+                }
+                rows.append(MessageRow(kind: .divider(day)))
+                currentDay = day
+            } else if currentDay == nil {
+                rows.append(MessageRow(kind: .divider(day)))
+                currentDay = day
+            }
+
+            if var group = currentGroup, group.isFromUser == message.isFromUser {
+                group.messages.append(message)
+                group.lastTimestamp = message.timestamp
+                currentGroup = group
+            } else {
+                if let group = currentGroup {
+                    rows.append(MessageRow(kind: .group(group)))
+                }
+                currentGroup = MessageGroup(
+                    id: message.id,
+                    isFromUser: message.isFromUser,
+                    messages: [message],
+                    day: day,
+                    lastTimestamp: message.timestamp
+                )
+            }
+        }
+
+        if let group = currentGroup {
+            rows.append(MessageRow(kind: .group(group)))
+        }
+
+        return rows
+    }
+
+    private func toggleGroup(_ id: UUID) {
+        if expandedGroupIds.contains(id) {
+            expandedGroupIds.remove(id)
+        } else {
+            expandedGroupIds.insert(id)
+        }
+    }
+
+    private struct MessageRow: Identifiable {
+        enum Kind {
+            case divider(Date)
+            case group(MessageGroup)
+        }
+
+        let kind: Kind
+
+        var id: String {
+            switch kind {
+            case let .divider(date):
+                return "day-\(date.timeIntervalSinceReferenceDate)"
+            case let .group(group):
+                return "group-\(group.id.uuidString)"
+            }
+        }
+    }
+
+    private struct MessageGroup: Equatable {
+        let id: UUID
+        let isFromUser: Bool
+        var messages: [Message]
+        let day: Date
+        var lastTimestamp: Date
+    }
+
+    private struct MessageGroupView: View {
+        let group: MessageGroup
+        let isExpanded: Bool
+        let onToggle: () -> Void
+
+        var body: some View {
+            VStack(
+                alignment: group.isFromUser ? .trailing : .leading,
+                spacing: LiquidGlass.Spacing.xxs
+            ) {
+                ForEach(group.messages) { message in
+                    MessageBubble(message: message)
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: group.isFromUser ? .trailing : .leading
+                        )
+                }
+            }
+            .overlay(alignment: group.isFromUser ? .topTrailing : .topLeading) {
+                if isExpanded {
+                    Text(group.lastTimestamp, style: .time)
+                        .font(LiquidGlass.Typography.timestamp)
+                        .foregroundStyle(LiquidGlass.Colors.secondaryText)
+                        .offset(y: -14)
+                        .transition(.opacity)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(LiquidGlass.Animation.quick) {
+                    onToggle()
+                }
+            }
+        }
+    }
+
+    private struct DateDivider: View {
+        let date: Date
+
+        var body: some View {
+            HStack(spacing: LiquidGlass.Spacing.sm) {
+                line
+                Text(date, style: .date)
+                    .font(.caption)
+                    .foregroundStyle(LiquidGlass.Colors.secondaryText)
+                    .padding(.horizontal, LiquidGlass.Spacing.sm)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: LiquidGlass.CornerRadius.pill)
+                            .fill(Color.secondary.opacity(0.08))
+                    )
+                line
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, LiquidGlass.Spacing.xs)
+        }
+
+        private var line: some View {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.15))
+                .frame(height: 1)
+        }
+    }
+
+    private var hasStreamingText: Bool {
+        guard let text = viewModel.streamingAssistantText else { return false }
+        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // MARK: - Input Bar

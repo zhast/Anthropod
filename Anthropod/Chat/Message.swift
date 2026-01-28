@@ -14,6 +14,7 @@ final class Message {
     var content: String
     var isFromUser: Bool
     var timestamp: Date
+    var sortIndex: Int?
 
     /// Optional session/conversation grouping
     var sessionId: UUID?
@@ -26,6 +27,7 @@ final class Message {
         content: String,
         isFromUser: Bool,
         timestamp: Date = Date(),
+        sortIndex: Int? = nil,
         sessionId: UUID? = nil,
         isStreaming: Bool = false
     ) {
@@ -33,6 +35,7 @@ final class Message {
         self.content = content
         self.isFromUser = isFromUser
         self.timestamp = timestamp
+        self.sortIndex = sortIndex
         self.sessionId = sessionId
         self.isStreaming = isStreaming
     }
@@ -41,12 +44,12 @@ final class Message {
 // MARK: - Convenience
 
 extension Message {
-    static func user(_ content: String, sessionId: UUID? = nil) -> Message {
-        Message(content: content, isFromUser: true, sessionId: sessionId)
+    static func user(_ content: String, sessionId: UUID? = nil, sortIndex: Int? = nil) -> Message {
+        Message(content: content, isFromUser: true, sortIndex: sortIndex, sessionId: sessionId)
     }
 
-    static func assistant(_ content: String, sessionId: UUID? = nil, isStreaming: Bool = false) -> Message {
-        Message(content: content, isFromUser: false, sessionId: sessionId, isStreaming: isStreaming)
+    static func assistant(_ content: String, sessionId: UUID? = nil, sortIndex: Int? = nil, isStreaming: Bool = false) -> Message {
+        Message(content: content, isFromUser: false, sortIndex: sortIndex, sessionId: sessionId, isStreaming: isStreaming)
     }
 }
 
@@ -54,14 +57,14 @@ extension Message {
 
 #if DEBUG
 extension Message {
-    static let previewUser = Message.user("Hello, how can you help me today?")
-    static let previewAssistant = Message.assistant("Hi! I'm here to help. What would you like to know?")
+    static let previewUser = Message.user("Hello, how can you help me today?", sortIndex: 0)
+    static let previewAssistant = Message.assistant("Hi! I'm here to help. What would you like to know?", sortIndex: 1)
 
     static let previewConversation: [Message] = [
-        Message.user("What's the weather like?"),
-        Message.assistant("I don't have access to real-time weather data, but I can help you find a weather service or app that would be perfect for your needs."),
-        Message.user("Can you recommend one?"),
-        Message.assistant("Sure! Here are some popular options:\n\n- Weather.com\n- Apple Weather (built into iOS/macOS)\n- Dark Sky API for developers\n\nWould you like more details about any of these?")
+        Message.user("What's the weather like?", sortIndex: 0),
+        Message.assistant("I don't have access to real-time weather data, but I can help you find a weather service or app that would be perfect for your needs.", sortIndex: 1),
+        Message.user("Can you recommend one?", sortIndex: 2),
+        Message.assistant("Sure! Here are some popular options:\n\n- Weather.com\n- Apple Weather (built into iOS/macOS)\n- Dark Sky API for developers\n\nWould you like more details about any of these?", sortIndex: 3)
     ]
 }
 #endif

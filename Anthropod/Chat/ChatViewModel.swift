@@ -30,8 +30,11 @@ final class ChatViewModel {
     /// Current run ID for streaming response
     private var currentRunId: String?
 
-    /// Current assistant message being streamed
-    private var currentAssistantMessage: Message?
+    /// Streaming assistant text (not persisted)
+    var streamingAssistantText: String?
+
+    /// Local ordering for new messages before history refresh
+    private var nextSortIndex: Int = 0
 
     // MARK: - Dependencies
 
@@ -77,16 +80,14 @@ final class ChatViewModel {
         guard let modelContext else { return }
 
         // Create user message
-        let userMessage = Message.user(content, sessionId: currentSessionId)
+        let userMessage = Message.user(content, sessionId: currentSessionId, sortIndex: nextSortIndex)
+        nextSortIndex += 1
         modelContext.insert(userMessage)
 
         // Clear input
         inputText = ""
 
-        // Create placeholder for assistant response
-        let assistantMessage = Message.assistant("", sessionId: currentSessionId, isStreaming: true)
-        modelContext.insert(assistantMessage)
-        currentAssistantMessage = assistantMessage
+        streamingAssistantText = nil
 
         // Set loading state
         isLoading = true
@@ -94,7 +95,7 @@ final class ChatViewModel {
 
         // Send to gateway
         Task {
-            await sendToGateway(message: content, assistantMessage: assistantMessage)
+            await sendToGateway(message: content)
         }
     }
 
@@ -109,8 +110,9 @@ final class ChatViewModel {
     func startNewSession() {
         currentSessionId = UUID()
         currentRunId = nil
-        currentAssistantMessage = nil
+        streamingAssistantText = nil
         gatewaySessionKey = nil
+        nextSortIndex = 0
     }
 
     func abortCurrentRun() async {
@@ -118,8 +120,9 @@ final class ChatViewModel {
 
         do {
             _ = try await gateway.chatAbort(runId: runId)
-            currentAssistantMessage?.isStreaming = false
+            streamingAssistantText = nil
             isLoading = false
+            currentRunId = nil
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -170,17 +173,26 @@ final class ChatViewModel {
                 }
             }
 
+            var seenKeys = Set<String>()
+            var index = 0
             for entry in history {
                 let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty { continue }
+                if let key = dedupeKey(for: entry, content: trimmed) {
+                    if seenKeys.contains(key) { continue }
+                    seenKeys.insert(key)
+                }
                 let message = Message(
                     content: trimmed,
                     isFromUser: entry.isUser,
                     timestamp: entry.timestamp,
+                    sortIndex: index,
                     sessionId: sessionId
                 )
                 modelContext.insert(message)
+                index += 1
             }
+            nextSortIndex = index
             try? modelContext.save()
         } catch {
             errorMessage = error.localizedDescription
@@ -198,15 +210,14 @@ final class ChatViewModel {
         ))
     }
 
-    private func sendToGateway(message: String, assistantMessage: Message) async {
+    private func sendToGateway(message: String) async {
         // Connect if needed
         if !gateway.isConnected {
             await connectToGateway()
         }
 
         guard gateway.isConnected else {
-            assistantMessage.content = "Unable to connect to gateway. Please check that Moltbot is running."
-            assistantMessage.isStreaming = false
+            errorMessage = "Unable to connect to gateway. Please check that Moltbot is running."
             isLoading = false
             return
         }
@@ -220,40 +231,32 @@ final class ChatViewModel {
                 await MainActor.run {
                     guard let self else { return }
                     guard self.currentRunId == snapshotRunId else { return }
-                    if self.currentAssistantMessage?.content.isEmpty == true {
+                    if self.streamingAssistantText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
                         Task { await self.resumeGatewaySession() }
                     }
                 }
             }
         } catch {
-            assistantMessage.content = "Error: \(error.localizedDescription)"
-            assistantMessage.isStreaming = false
             isLoading = false
             errorMessage = error.localizedDescription
         }
     }
 
     private func handleAgentRunEvent(_ event: AgentRunEvent) {
-        guard let assistantMessage = currentAssistantMessage else { return }
-
-        // Update content if provided
-        if let content = event.content {
-            assistantMessage.content = content
+        if let content = event.content, !content.isEmpty {
+            streamingAssistantText = content
         }
-
-        // Check if complete
         if event.isComplete {
-            assistantMessage.isStreaming = false
             isLoading = false
             currentRunId = nil
-
-            if let error = event.error {
+            if let error = event.error, !error.isEmpty {
                 errorMessage = error
             }
         }
     }
 
     private func handleChatEvent(_ event: ChatRunEvent) {
+        _ = adoptRunIdIfNeeded(event.runId, sessionKey: event.sessionKey)
         if !event.sessionKey.isEmpty, event.sessionKey != gatewaySessionKey {
             gatewaySessionKey = event.sessionKey
             currentSessionId = stableSessionId(for: event.sessionKey)
@@ -263,7 +266,7 @@ final class ChatViewModel {
             if let error = event.errorMessage, !error.isEmpty {
                 errorMessage = error
             }
-            currentAssistantMessage?.isStreaming = false
+            streamingAssistantText = nil
             isLoading = false
             currentRunId = nil
             Task { await resumeGatewaySession(sessionKey: event.sessionKey) }
@@ -271,23 +274,55 @@ final class ChatViewModel {
     }
 
     private func handleAgentEvent(_ event: AgentStreamEvent) {
-        guard !event.runId.isEmpty else { return }
-        if let currentRunId, event.runId == currentRunId {
-            // ok
-        } else if let sessionKey = event.sessionKey,
-                  let gatewaySessionKey,
-                  sessionKey == gatewaySessionKey
-        {
-            // Accept events scoped to the current session when runId doesn't match.
-        } else {
-            return
-        }
+        guard adoptRunIdIfNeeded(event.runId, sessionKey: event.sessionKey) else { return }
 
         let stream = event.stream.lowercased()
         let isAssistant = stream == "assistant" || stream.hasPrefix("assistant.")
         if isAssistant, let text = event.text ?? event.rawText {
-            currentAssistantMessage?.content = text
+            streamingAssistantText = text
         }
+    }
+
+    private func adoptRunIdIfNeeded(_ runId: String, sessionKey: String?) -> Bool {
+        guard !runId.isEmpty else { return false }
+
+        if let existingRunId = currentRunId {
+            if runId == existingRunId { return true }
+            if isLoading {
+                currentRunId = runId
+                return true
+            }
+            if let sessionKey,
+               let gatewaySessionKey,
+               sessionKey == gatewaySessionKey
+            {
+                currentRunId = runId
+                return true
+            }
+            return false
+        }
+
+        if isLoading {
+            currentRunId = runId
+            return true
+        }
+
+        if let sessionKey,
+           let gatewaySessionKey,
+           sessionKey == gatewaySessionKey
+        {
+            currentRunId = runId
+            return true
+        }
+
+        return false
+    }
+
+    private func dedupeKey(for entry: GatewayChatHistoryMessage, content: String) -> String? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let millis = Int(entry.timestamp.timeIntervalSince1970 * 1000)
+        return "\(entry.role)|\(millis)|\(trimmed)"
     }
 }
 
@@ -300,7 +335,10 @@ extension ChatViewModel {
             predicate: #Predicate { message in
                 message.sessionId == currentSessionId
             },
-            sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+            sortBy: [
+                SortDescriptor(\.sortIndex, order: .forward),
+                SortDescriptor(\.timestamp, order: .forward)
+            ]
         )
         return descriptor
     }
