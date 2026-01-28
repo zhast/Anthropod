@@ -523,14 +523,123 @@ actor GatewayClient {
     private func traceEventDetails(_ event: EventFrame) async {
         guard traceEnabled else { return }
         guard ["agent", "chat", "agent.run", "health", "tick"].contains(event.event) else { return }
-        var summary = "event.\(event.event)"
+        if let summary = formatEventSummary(event) {
+            await trace(summary)
+            return
+        }
+        var fallback = "event.\(event.event)"
         if let payload = event.payload?.value {
             let rendered = renderJSON(payload, maxChars: 800)
             if !rendered.isEmpty {
-                summary += " payload=\(rendered)"
+                fallback += " payload=\(rendered)"
             }
         }
-        await trace(summary)
+        await trace(fallback)
+    }
+
+    private func formatEventSummary(_ event: EventFrame) -> String? {
+        guard let payload = event.payload?.value as? [String: Any] else { return nil }
+        switch event.event {
+        case "agent":
+            return formatAgentEvent(payload)
+        case "chat":
+            return formatChatEvent(payload)
+        case "agent.run":
+            return formatAgentRunEvent(payload)
+        case "health":
+            return formatHealthEvent(payload)
+        case "tick":
+            return "event.tick"
+        default:
+            return nil
+        }
+    }
+
+    private func formatAgentEvent(_ payload: [String: Any]) -> String {
+        let runId = payload["runId"] as? String ?? ""
+        let seq = payload["seq"] as? Int
+        let stream = payload["stream"] as? String ?? ""
+        let sessionKey = payload["sessionKey"] as? String
+        var parts = ["event.agent"]
+        if !stream.isEmpty { parts.append("stream=\(stream)") }
+        if let seq { parts.append("seq=\(seq)") }
+        if !runId.isEmpty { parts.append("runId=\(runId)") }
+        if let sessionKey, !sessionKey.isEmpty { parts.append("sessionKey=\(sessionKey)") }
+        if let data = payload["data"] as? [String: Any] {
+            if stream.lowercased().hasPrefix("assistant") {
+                let text = (data["delta"] as? String) ?? (data["text"] as? String) ?? (data["content"] as? String)
+                if let text, !text.isEmpty {
+                    parts.append("text=\"\(compactText(text))\"")
+                }
+            } else if stream.lowercased() == "lifecycle", let phase = data["phase"] as? String {
+                parts.append("phase=\(phase)")
+            }
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private func formatChatEvent(_ payload: [String: Any]) -> String {
+        let runId = payload["runId"] as? String ?? ""
+        let state = payload["state"] as? String ?? ""
+        let sessionKey = payload["sessionKey"] as? String
+        var parts = ["event.chat"]
+        if !state.isEmpty { parts.append("state=\(state)") }
+        if !runId.isEmpty { parts.append("runId=\(runId)") }
+        if let sessionKey, !sessionKey.isEmpty { parts.append("sessionKey=\(sessionKey)") }
+        if let message = payload["message"] as? [String: Any] {
+            if let text = extractChatMessageText(message), !text.isEmpty {
+                parts.append("text=\"\(compactText(text))\"")
+            }
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private func formatAgentRunEvent(_ payload: [String: Any]) -> String {
+        let runId = payload["runId"] as? String ?? ""
+        let status = payload["status"] as? String ?? ""
+        let sessionKey = payload["sessionKey"] as? String
+        var parts = ["event.agent.run"]
+        if !status.isEmpty { parts.append("status=\(status)") }
+        if !runId.isEmpty { parts.append("runId=\(runId)") }
+        if let sessionKey, !sessionKey.isEmpty { parts.append("sessionKey=\(sessionKey)") }
+        if let content = payload["content"] as? String, !content.isEmpty {
+            parts.append("content=\"\(compactText(content))\"")
+        }
+        if let error = payload["error"] as? String, !error.isEmpty {
+            parts.append("error=\"\(compactText(error))\"")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private func formatHealthEvent(_ payload: [String: Any]) -> String {
+        if let ok = payload["ok"] {
+            return "event.health ok=\(ok)"
+        }
+        return "event.health"
+    }
+
+    private func extractChatMessageText(_ message: [String: Any]) -> String? {
+        if let content = message["content"] as? String {
+            return content
+        }
+        if let content = message["content"] as? [[String: Any]] {
+            let parts = content.compactMap { item -> String? in
+                if let text = item["text"] as? String { return text }
+                if let content = item["content"] as? String { return content }
+                return nil
+            }
+            if !parts.isEmpty { return parts.joined(separator: "") }
+        }
+        return message["text"] as? String
+    }
+
+    private func compactText(_ text: String, limit: Int = 120) -> String {
+        let normalized = text
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "")
+        if normalized.count <= limit { return normalized }
+        let prefix = normalized.prefix(limit)
+        return "\(prefix)…"
     }
 
     private func renderJSON(_ value: Any, maxChars: Int) -> String {
