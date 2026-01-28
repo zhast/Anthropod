@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-struct DeviceIdentity: Codable, Sendable {
+nonisolated struct DeviceIdentity: Codable, Sendable {
     let deviceId: String
     let publicKey: String
     let privateKey: String
@@ -9,9 +9,9 @@ struct DeviceIdentity: Codable, Sendable {
 }
 
 enum DeviceIdentityPaths {
-    private static let stateDirEnv = "CLAWDBOT_STATE_DIR"
+    nonisolated private static let stateDirEnv = "CLAWDBOT_STATE_DIR"
 
-    static func stateDirURL() -> URL {
+    nonisolated static func stateDirURL() -> URL {
         if let raw = getenv(self.stateDirEnv) {
             let value = String(cString: raw).trimmingCharacters(in: .whitespacesAndNewlines)
             if !value.isEmpty {
@@ -28,9 +28,9 @@ enum DeviceIdentityPaths {
 }
 
 enum DeviceIdentityStore {
-    private static let fileName = "device.json"
+    nonisolated private static let fileName = "device.json"
 
-    static func loadOrCreate() -> DeviceIdentity {
+    nonisolated static func loadOrCreate() -> DeviceIdentity {
         let url = self.fileURL()
         if let data = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode(DeviceIdentity.self, from: data),
@@ -44,7 +44,7 @@ enum DeviceIdentityStore {
         return identity
     }
 
-    static func signPayload(_ payload: String, identity: DeviceIdentity) -> String? {
+    nonisolated static func signPayload(_ payload: String, identity: DeviceIdentity) -> String? {
         guard let privateKeyData = Data(base64Encoded: identity.privateKey) else { return nil }
         do {
             let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: privateKeyData)
@@ -55,12 +55,12 @@ enum DeviceIdentityStore {
         }
     }
 
-    static func publicKeyBase64Url(_ identity: DeviceIdentity) -> String? {
+    nonisolated static func publicKeyBase64Url(_ identity: DeviceIdentity) -> String? {
         guard let data = Data(base64Encoded: identity.publicKey) else { return nil }
         return self.base64UrlEncode(data)
     }
 
-    private static func generate() -> DeviceIdentity {
+    nonisolated private static func generate() -> DeviceIdentity {
         let privateKey = Curve25519.Signing.PrivateKey()
         let publicKey = privateKey.publicKey
         let publicKeyData = publicKey.rawRepresentation
@@ -73,7 +73,7 @@ enum DeviceIdentityStore {
             createdAtMs: Int(Date().timeIntervalSince1970 * 1000))
     }
 
-    private static func base64UrlEncode(_ data: Data) -> String {
+    nonisolated private static func base64UrlEncode(_ data: Data) -> String {
         let base64 = data.base64EncodedString()
         return base64
             .replacingOccurrences(of: "+", with: "-")
@@ -81,7 +81,7 @@ enum DeviceIdentityStore {
             .replacingOccurrences(of: "=", with: "")
     }
 
-    private static func save(_ identity: DeviceIdentity) {
+    nonisolated private static func save(_ identity: DeviceIdentity) {
         let url = self.fileURL()
         do {
             try FileManager.default.createDirectory(
@@ -94,7 +94,7 @@ enum DeviceIdentityStore {
         }
     }
 
-    private static func fileURL() -> URL {
+    nonisolated private static func fileURL() -> URL {
         let base = DeviceIdentityPaths.stateDirURL()
         return base
             .appendingPathComponent("identity", isDirectory: true)

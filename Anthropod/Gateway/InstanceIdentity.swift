@@ -1,19 +1,19 @@
 import Foundation
 
 enum InstanceIdentity {
-    private static let suiteName = "bot.molt.shared"
-    private static let legacySuiteName = "com.clawdbot.shared"
-    private static let instanceIdKey = "instanceId"
+    nonisolated private static let suiteName = "bot.molt.shared"
+    nonisolated private static let legacySuiteName = "com.clawdbot.shared"
+    nonisolated private static let instanceIdKey = "instanceId"
 
-    private static var defaults: UserDefaults {
+    nonisolated private static var defaults: UserDefaults {
         UserDefaults(suiteName: suiteName) ?? .standard
     }
 
-    private static var legacyDefaults: UserDefaults? {
+    nonisolated private static var legacyDefaults: UserDefaults? {
         UserDefaults(suiteName: legacySuiteName)
     }
 
-    static let instanceId: String = {
+    nonisolated static let instanceId: String = {
         let defaults = Self.defaults
         if let existing = defaults.string(forKey: instanceIdKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -33,7 +33,7 @@ enum InstanceIdentity {
         return id
     }()
 
-    static let displayName: String = {
+    nonisolated static let displayName: String = {
         if let name = Host.current().localizedName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !name.isEmpty {
             return name
@@ -41,7 +41,7 @@ enum InstanceIdentity {
         return "moltbot"
     }()
 
-    static let modelIdentifier: String? = {
+    nonisolated static let modelIdentifier: String? = {
         var size = 0
         guard sysctlbyname("hw.model", nil, &size, nil, 0) == 0, size > 1 else { return nil }
 
@@ -54,9 +54,9 @@ enum InstanceIdentity {
         return trimmed.isEmpty ? nil : trimmed
     }()
 
-    static let deviceFamily: String = { "Mac" }()
+    nonisolated static let deviceFamily: String = { "Mac" }()
 
-    static let platformString: String = {
+    nonisolated static let platformString: String = {
         let v = ProcessInfo.processInfo.operatingSystemVersion
         return "macOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
     }()

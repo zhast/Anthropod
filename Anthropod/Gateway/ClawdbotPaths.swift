@@ -1,7 +1,7 @@
 import Foundation
 
 enum ClawdbotEnv {
-    static func path(_ key: String) -> String? {
+    nonisolated static func path(_ key: String) -> String? {
         guard let raw = getenv(key) else { return nil }
         let value = String(cString: raw).trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
@@ -9,10 +9,10 @@ enum ClawdbotEnv {
 }
 
 enum ClawdbotPaths {
-    private static let configPathEnv = "CLAWDBOT_CONFIG_PATH"
-    private static let stateDirEnv = "CLAWDBOT_STATE_DIR"
+    nonisolated private static let configPathEnv = "CLAWDBOT_CONFIG_PATH"
+    nonisolated private static let stateDirEnv = "CLAWDBOT_STATE_DIR"
 
-    static var stateDirURL: URL {
+    nonisolated static var stateDirURL: URL {
         if let override = ClawdbotEnv.path(self.stateDirEnv) {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
@@ -20,7 +20,7 @@ enum ClawdbotPaths {
             .appendingPathComponent(".clawdbot", isDirectory: true)
     }
 
-    static var configURL: URL {
+    nonisolated static var configURL: URL {
         if let override = ClawdbotEnv.path(self.configPathEnv) {
             return URL(fileURLWithPath: override)
         }

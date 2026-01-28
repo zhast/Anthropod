@@ -2,13 +2,13 @@ import Foundation
 import OSLog
 
 enum ClawdbotConfigFile {
-    private static let logger = Logger(subsystem: "bot.molt.anthropod", category: "config")
+    nonisolated private static let logger = Logger(subsystem: "bot.molt.anthropod", category: "config")
 
-    static func url() -> URL {
+    nonisolated static func url() -> URL {
         ClawdbotPaths.configURL
     }
 
-    static func loadDict() -> [String: Any] {
+    nonisolated static func loadDict() -> [String: Any] {
         let url = self.url()
         guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
         do {
@@ -24,7 +24,7 @@ enum ClawdbotConfigFile {
         }
     }
 
-    static func gatewayPort() -> Int? {
+    nonisolated static func gatewayPort() -> Int? {
         let root = self.loadDict()
         guard let gateway = root["gateway"] as? [String: Any] else { return nil }
         if let port = gateway["port"] as? Int, port > 0 { return port }
@@ -40,7 +40,7 @@ enum ClawdbotConfigFile {
         return nil
     }
 
-    static func gatewayMode() -> String? {
+    nonisolated static func gatewayMode() -> String? {
         let root = self.loadDict()
         guard let gateway = root["gateway"] as? [String: Any],
               let mode = gateway["mode"] as? String
@@ -51,27 +51,27 @@ enum ClawdbotConfigFile {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    static func gatewayAuthToken() -> String? {
+    nonisolated static func gatewayAuthToken() -> String? {
         let root = self.loadDict()
         return Self.resolveGatewayToken(root: root, preferRemote: false)
     }
 
-    static func gatewayAuthPassword() -> String? {
+    nonisolated static func gatewayAuthPassword() -> String? {
         let root = self.loadDict()
         return Self.resolveGatewayPassword(root: root, preferRemote: false)
     }
 
-    static func gatewayRemoteToken() -> String? {
+    nonisolated static func gatewayRemoteToken() -> String? {
         let root = self.loadDict()
         return Self.resolveGatewayToken(root: root, preferRemote: true)
     }
 
-    static func gatewayRemotePassword() -> String? {
+    nonisolated static func gatewayRemotePassword() -> String? {
         let root = self.loadDict()
         return Self.resolveGatewayPassword(root: root, preferRemote: true)
     }
 
-    static func gatewayRemoteURL() -> URL? {
+    nonisolated static func gatewayRemoteURL() -> URL? {
         let root = self.loadDict()
         guard let gateway = root["gateway"] as? [String: Any],
               let remote = gateway["remote"] as? [String: Any],
@@ -84,7 +84,7 @@ enum ClawdbotConfigFile {
         return URL(string: trimmed)
     }
 
-    private static func resolveGatewayToken(root: [String: Any], preferRemote: Bool) -> String? {
+    nonisolated private static func resolveGatewayToken(root: [String: Any], preferRemote: Bool) -> String? {
         if preferRemote {
             if let gateway = root["gateway"] as? [String: Any],
                let remote = gateway["remote"] as? [String: Any],
@@ -103,7 +103,7 @@ enum ClawdbotConfigFile {
         return nil
     }
 
-    private static func resolveGatewayPassword(root: [String: Any], preferRemote: Bool) -> String? {
+    nonisolated private static func resolveGatewayPassword(root: [String: Any], preferRemote: Bool) -> String? {
         if preferRemote {
             if let gateway = root["gateway"] as? [String: Any],
                let remote = gateway["remote"] as? [String: Any],
@@ -122,7 +122,7 @@ enum ClawdbotConfigFile {
         return nil
     }
 
-    private static func parseConfigData(_ data: Data) -> [String: Any]? {
+    nonisolated private static func parseConfigData(_ data: Data) -> [String: Any]? {
         if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             return root
         }
@@ -139,7 +139,7 @@ enum ClawdbotConfigFile {
 }
 
 private extension String {
-    var nonEmpty: String? {
+    nonisolated var nonEmpty: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }

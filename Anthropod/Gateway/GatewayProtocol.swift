@@ -9,13 +9,13 @@ import Foundation
 
 // MARK: - Protocol Version
 
-let GATEWAY_PROTOCOL_VERSION = 3
+nonisolated let GATEWAY_PROTOCOL_VERSION = 3
 
 // MARK: - AnyCodable
 
 /// A type-erased Codable value for dynamic JSON
 @preconcurrency
-struct AnyCodable: Codable, @unchecked Sendable {
+nonisolated struct AnyCodable: Codable, @unchecked Sendable {
     nonisolated let value: Any
 
     nonisolated init(_ value: Any) {
@@ -71,7 +71,7 @@ struct AnyCodable: Codable, @unchecked Sendable {
 // MARK: - Request Frame
 
 @preconcurrency
-struct RequestFrame: Codable, Sendable {
+nonisolated struct RequestFrame: Codable, Sendable {
     nonisolated let type: String
     nonisolated let id: String
     nonisolated let method: String
@@ -88,7 +88,7 @@ struct RequestFrame: Codable, Sendable {
 // MARK: - Response Frame
 
 @preconcurrency
-struct ResponseFrame: Codable, Sendable {
+nonisolated struct ResponseFrame: Codable, Sendable {
     nonisolated let type: String
     nonisolated let id: String
     nonisolated let ok: Bool?
@@ -99,7 +99,7 @@ struct ResponseFrame: Codable, Sendable {
 // MARK: - Event Frame
 
 @preconcurrency
-struct EventFrame: Codable, Sendable {
+nonisolated struct EventFrame: Codable, Sendable {
     nonisolated let type: String
     nonisolated let event: String
     nonisolated let payload: AnyCodable?
@@ -110,7 +110,7 @@ struct EventFrame: Codable, Sendable {
 // MARK: - Gateway Frame (discriminated union)
 
 @preconcurrency
-enum GatewayFrame: Sendable, Decodable {
+nonisolated enum GatewayFrame: Sendable, Decodable {
     case req(RequestFrame)
     case res(ResponseFrame)
     case event(EventFrame)
@@ -139,7 +139,7 @@ enum GatewayFrame: Sendable, Decodable {
 // MARK: - Hello Response
 
 @preconcurrency
-struct HelloOk: Codable, Sendable {
+nonisolated struct HelloOk: Codable, Sendable {
     nonisolated let type: String
     nonisolated let `protocol`: Int
     nonisolated let server: [String: AnyCodable]
@@ -162,7 +162,7 @@ struct HelloOk: Codable, Sendable {
 }
 
 @preconcurrency
-struct HelloSnapshot: Codable, Sendable {
+nonisolated struct HelloSnapshot: Codable, Sendable {
     nonisolated let presence: [AnyCodable]?
     nonisolated let health: AnyCodable?
     nonisolated let stateVersion: [String: Int]?
@@ -185,7 +185,7 @@ struct HelloSnapshot: Codable, Sendable {
 // MARK: - Chat Types
 
 @preconcurrency
-struct ChatHistoryPayload: Decodable, Sendable {
+nonisolated struct ChatHistoryPayload: Decodable, Sendable {
     nonisolated let sessionKey: String
     nonisolated let sessionId: String?
     nonisolated let messages: [GatewayChatHistoryMessage]
@@ -193,7 +193,7 @@ struct ChatHistoryPayload: Decodable, Sendable {
 }
 
 @preconcurrency
-struct GatewayChatHistoryMessage: Decodable, Sendable {
+nonisolated struct GatewayChatHistoryMessage: Decodable, Sendable {
     nonisolated let role: String
     nonisolated let content: String
     nonisolated let ts: Int?
@@ -238,13 +238,13 @@ struct GatewayChatHistoryMessage: Decodable, Sendable {
     }
 }
 
-private struct GatewayChatContentItem: Decodable {
+nonisolated private struct GatewayChatContentItem: Decodable {
     let type: String?
     let text: String?
 }
 
 @preconcurrency
-struct ChatSendResponse: Decodable, Sendable {
+nonisolated struct ChatSendResponse: Decodable, Sendable {
     nonisolated let runId: String?
     nonisolated let status: String?
 }
@@ -252,7 +252,7 @@ struct ChatSendResponse: Decodable, Sendable {
 // MARK: - Models
 
 @preconcurrency
-struct ModelChoice: Decodable, Sendable, Identifiable, Hashable {
+nonisolated struct ModelChoice: Decodable, Sendable, Identifiable, Hashable {
     nonisolated let id: String
     nonisolated let name: String
     nonisolated let provider: String

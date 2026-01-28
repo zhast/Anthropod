@@ -1,28 +1,28 @@
 import Foundation
 
-struct DeviceAuthEntry: Codable, Sendable {
+nonisolated struct DeviceAuthEntry: Codable, Sendable {
     let token: String
     let role: String
     let scopes: [String]
     let updatedAtMs: Int
 }
 
-private struct DeviceAuthStoreFile: Codable {
+nonisolated private struct DeviceAuthStoreFile: Codable {
     var version: Int
     var deviceId: String
     var tokens: [String: DeviceAuthEntry]
 }
 
 enum DeviceAuthStore {
-    private static let fileName = "device-auth.json"
+    nonisolated private static let fileName = "device-auth.json"
 
-    static func loadToken(deviceId: String, role: String) -> DeviceAuthEntry? {
+    nonisolated static func loadToken(deviceId: String, role: String) -> DeviceAuthEntry? {
         guard let store = readStore(), store.deviceId == deviceId else { return nil }
         let role = normalizeRole(role)
         return store.tokens[role]
     }
 
-    static func storeToken(
+    nonisolated static func storeToken(
         deviceId: String,
         role: String,
         token: String,
@@ -49,7 +49,7 @@ enum DeviceAuthStore {
         return entry
     }
 
-    static func clearToken(deviceId: String, role: String) {
+    nonisolated static func clearToken(deviceId: String, role: String) {
         guard var store = readStore(), store.deviceId == deviceId else { return }
         let normalizedRole = normalizeRole(role)
         guard store.tokens[normalizedRole] != nil else { return }
@@ -57,24 +57,24 @@ enum DeviceAuthStore {
         writeStore(store)
     }
 
-    private static func normalizeRole(_ role: String) -> String {
+    nonisolated private static func normalizeRole(_ role: String) -> String {
         role.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func normalizeScopes(_ scopes: [String]) -> [String] {
+    nonisolated private static func normalizeScopes(_ scopes: [String]) -> [String] {
         let trimmed = scopes
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         return Array(Set(trimmed)).sorted()
     }
 
-    private static func fileURL() -> URL {
+    nonisolated private static func fileURL() -> URL {
         DeviceIdentityPaths.stateDirURL()
             .appendingPathComponent("identity", isDirectory: true)
             .appendingPathComponent(fileName, isDirectory: false)
     }
 
-    private static func readStore() -> DeviceAuthStoreFile? {
+    nonisolated private static func readStore() -> DeviceAuthStoreFile? {
         let url = fileURL()
         guard let data = try? Data(contentsOf: url) else { return nil }
         guard let decoded = try? JSONDecoder().decode(DeviceAuthStoreFile.self, from: data) else {
@@ -84,7 +84,7 @@ enum DeviceAuthStore {
         return decoded
     }
 
-    private static func writeStore(_ store: DeviceAuthStoreFile) {
+    nonisolated private static func writeStore(_ store: DeviceAuthStoreFile) {
         let url = fileURL()
         do {
             try FileManager.default.createDirectory(

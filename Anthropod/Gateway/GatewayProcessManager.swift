@@ -173,6 +173,26 @@ final class GatewayProcessManager {
 }
 
 private enum PortProbe {
+    private final class Resolution {
+        nonisolated private let lock = NSLock()
+        nonisolated(unsafe) private var resolved = false
+
+        nonisolated func resolveIfNeeded(
+            connection: NWConnection,
+            continuation: CheckedContinuation<Bool, Never>,
+            value: Bool
+        ) {
+            lock.lock()
+            let shouldResolve = !resolved
+            resolved = true
+            lock.unlock()
+
+            guard shouldResolve else { return }
+            connection.cancel()
+            continuation.resume(returning: value)
+        }
+    }
+
     static func isListening(host: String?, port: Int?) async -> Bool {
         guard let host, let port else { return false }
         guard let endpointPort = NWEndpoint.Port(rawValue: UInt16(port)) else { return false }
@@ -180,19 +200,22 @@ private enum PortProbe {
         return await withCheckedContinuation { continuation in
             let connection = NWConnection(host: endpointHost, port: endpointPort, using: .tcp)
             let queue = DispatchQueue(label: "anthropod.portprobe")
-            var resolved = false
+            let resolution = Resolution()
 
             connection.stateUpdateHandler = { state in
-                guard !resolved else { return }
                 switch state {
                 case .ready:
-                    resolved = true
-                    connection.cancel()
-                    continuation.resume(returning: true)
+                    resolution.resolveIfNeeded(
+                        connection: connection,
+                        continuation: continuation,
+                        value: true
+                    )
                 case .failed, .cancelled:
-                    resolved = true
-                    connection.cancel()
-                    continuation.resume(returning: false)
+                    resolution.resolveIfNeeded(
+                        connection: connection,
+                        continuation: continuation,
+                        value: false
+                    )
                 default:
                     break
                 }
@@ -201,10 +224,11 @@ private enum PortProbe {
             connection.start(queue: queue)
 
             queue.asyncAfter(deadline: .now() + 0.6) {
-                guard !resolved else { return }
-                resolved = true
-                connection.cancel()
-                continuation.resume(returning: false)
+                resolution.resolveIfNeeded(
+                    connection: connection,
+                    continuation: continuation,
+                    value: false
+                )
             }
         }
     }

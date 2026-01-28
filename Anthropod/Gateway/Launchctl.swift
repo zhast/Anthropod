@@ -1,6 +1,6 @@
 import Foundation
 
-struct LaunchAgentPlistSnapshot: Equatable, Sendable {
+nonisolated struct LaunchAgentPlistSnapshot: Equatable, Sendable {
     let programArguments: [String]
     let environment: [String: String]
     let stdoutPath: String?
@@ -12,7 +12,7 @@ struct LaunchAgentPlistSnapshot: Equatable, Sendable {
 }
 
 enum LaunchAgentPlist {
-    static func snapshot(url: URL) -> LaunchAgentPlistSnapshot? {
+    nonisolated static func snapshot(url: URL) -> LaunchAgentPlistSnapshot? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         let rootAny: Any
         do {
@@ -46,12 +46,12 @@ enum LaunchAgentPlist {
         )
     }
 
-    private static func extractFlagInt(_ args: [String], flag: String) -> Int? {
+    nonisolated private static func extractFlagInt(_ args: [String], flag: String) -> Int? {
         guard let raw = self.extractFlagString(args, flag: flag) else { return nil }
         return Int(raw)
     }
 
-    private static func extractFlagString(_ args: [String], flag: String) -> String? {
+    nonisolated private static func extractFlagString(_ args: [String], flag: String) -> String? {
         guard let idx = args.firstIndex(of: flag) else { return nil }
         let valueIdx = args.index(after: idx)
         guard valueIdx < args.endIndex else { return nil }
@@ -61,7 +61,7 @@ enum LaunchAgentPlist {
 }
 
 private extension String {
-    var nonEmpty: String? {
+    nonisolated var nonEmpty: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
