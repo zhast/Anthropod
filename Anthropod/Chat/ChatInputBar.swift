@@ -37,7 +37,7 @@ struct ChatInputBar: View {
         }
         .padding(.horizontal, LiquidGlass.Spacing.inputBarPaddingH)
         .padding(.vertical, LiquidGlass.Spacing.inputBarPaddingV)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: LiquidGlass.CornerRadius.inputBar))
+        .glassEffect(.regular, in: .capsule)
     }
 
     private var canSend: Bool {
@@ -87,7 +87,7 @@ struct ChatInputBarWithVoice: View {
             }
             .padding(.horizontal, LiquidGlass.Spacing.inputBarPaddingH)
             .padding(.vertical, LiquidGlass.Spacing.inputBarPaddingV)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: LiquidGlass.CornerRadius.inputBar))
+            .glassEffect(.regular, in: .capsule)
         }
     }
 

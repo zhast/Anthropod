@@ -45,7 +45,7 @@ struct GlassCard<Content: View>: View {
 
     var body: some View {
         content()
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius))
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
 
@@ -115,16 +115,16 @@ struct VoiceButton: View {
 extension View {
     /// Apply standard glass effect with default corner radius
     func standardGlass() -> some View {
-        self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: LiquidGlass.CornerRadius.lg))
+        self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: LiquidGlass.CornerRadius.lg, style: .continuous))
     }
 
     /// Apply interactive glass effect
     @ViewBuilder
     func interactiveGlass(tint: Color? = nil) -> some View {
         if let tint {
-            self.glassEffect(.regular.tint(tint).interactive(), in: RoundedRectangle(cornerRadius: LiquidGlass.CornerRadius.lg))
+            self.glassEffect(.regular.tint(tint).interactive(), in: RoundedRectangle(cornerRadius: LiquidGlass.CornerRadius.lg, style: .continuous))
         } else {
-            self.glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: LiquidGlass.CornerRadius.lg))
+            self.glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: LiquidGlass.CornerRadius.lg, style: .continuous))
         }
     }
 
