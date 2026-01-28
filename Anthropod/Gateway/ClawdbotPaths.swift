@@ -35,4 +35,8 @@ enum ClawdbotPaths {
         }
         return moltbot
     }
+
+    nonisolated static var agentsURL: URL {
+        stateDirURL.appendingPathComponent("agents.md")
+    }
 }

@@ -16,6 +16,9 @@ struct SettingsView: View {
     @AppStorage(AnthropodDefaults.compactMaxLines) private var compactMaxLines = 400
     @AppStorage(AnthropodDefaults.preferredModelId) private var preferredModelId = ""
 
+    @State private var isConfigUnlocked = false
+    @State private var isAgentsUnlocked = false
+
     var body: some View {
         TabView {
             Tab("General", systemImage: "gearshape") {
@@ -29,6 +32,9 @@ struct SettingsView: View {
             }
             Tab("Usage", systemImage: "chart.bar") {
                 usagePane
+            }
+            Tab("Files", systemImage: "doc.text") {
+                configPane
             }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -165,6 +171,39 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var configPane: some View {
+        Form {
+            Section("Config Files") {
+                ConfigFileEditor(
+                    title: "Config",
+                    subtitle: model.configPath,
+                    text: $model.configText,
+                    isUnlocked: $isConfigUnlocked,
+                    isLoading: model.isLoadingConfig,
+                    error: model.configError,
+                    hasChanges: model.configText != model.configOriginalText,
+                    onReload: { Task { await model.loadConfigFile() } },
+                    onSave: { Task { await model.saveConfigFile() } }
+                )
+                ConfigFileEditor(
+                    title: "Agents",
+                    subtitle: model.agentsPath,
+                    text: $model.agentsText,
+                    isUnlocked: $isAgentsUnlocked,
+                    isLoading: model.isLoadingAgents,
+                    error: model.agentsError,
+                    hasChanges: model.agentsText != model.agentsOriginalText,
+                    onReload: { Task { await model.loadAgentsFile() } },
+                    onSave: { Task { await model.saveAgentsFile() } }
+                )
+            }
+        }
+        .formStyle(.grouped)
+        .task {
+            await model.refreshConfigFiles()
+        }
     }
 
     private var selectedModelChoice: ModelChoice? {
@@ -406,5 +445,68 @@ private struct UsageCardStatsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
+    }
+}
+
+private struct ConfigFileEditor: View {
+    let title: String
+    let subtitle: String?
+    @Binding var text: String
+    @Binding var isUnlocked: Bool
+    let isLoading: Bool
+    let error: String?
+    let hasChanges: Bool
+    let onReload: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button {
+                    isUnlocked.toggle()
+                } label: {
+                    Label(isUnlocked ? "Lock" : "Unlock", systemImage: isUnlocked ? "lock.open" : "lock")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            TextEditor(text: $text)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 180)
+                .disabled(!isUnlocked)
+                .textSelection(.enabled)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(.secondary.opacity(0.2), lineWidth: 1)
+                )
+
+            HStack(spacing: 12) {
+                Button("Reload") {
+                    onReload()
+                }
+                .disabled(isLoading)
+                Button("Save") {
+                    onSave()
+                }
+                .disabled(!isUnlocked || !hasChanges || isLoading)
+                Spacer()
+                if let error, !error.isEmpty {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

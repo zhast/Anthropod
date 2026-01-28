@@ -27,12 +27,24 @@ final class SettingsViewModel {
     var usageError: String?
 
     var compactStatus: String?
+    var configPath: String?
+    var configText = ""
+    var configOriginalText = ""
+    var isLoadingConfig = false
+    var configError: String?
+
+    var agentsPath: String?
+    var agentsText = ""
+    var agentsOriginalText = ""
+    var isLoadingAgents = false
+    var agentsError: String?
 
     func refreshAll() async {
         await ensureConnected()
         await refreshModels()
         await refreshModelStatus()
         await refreshUsage()
+        await refreshConfigFiles()
     }
 
     func refreshModels() async {
@@ -107,6 +119,85 @@ final class SettingsViewModel {
             compactStatus = "Compacted chat history"
         } catch {
             compactStatus = error.localizedDescription
+        }
+    }
+
+    func refreshConfigFiles() async {
+        await loadConfigFile()
+        await loadAgentsFile()
+    }
+
+    func loadConfigFile() async {
+        isLoadingConfig = true
+        configError = nil
+        defer { isLoadingConfig = false }
+
+        let url = ClawdbotPaths.configURL
+        configPath = url.path
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            configText = text
+            configOriginalText = text
+        } catch {
+            configError = "Unable to load config: \(error.localizedDescription)"
+            configText = ""
+            configOriginalText = ""
+        }
+    }
+
+    func saveConfigFile() async {
+        let url = ClawdbotPaths.configURL
+        configPath = url.path
+        do {
+            try FileManager.default.createDirectory(
+                at: ClawdbotPaths.stateDirURL,
+                withIntermediateDirectories: true
+            )
+            try configText.write(to: url, atomically: true, encoding: .utf8)
+            configOriginalText = configText
+            configError = nil
+        } catch {
+            configError = "Unable to save config: \(error.localizedDescription)"
+        }
+    }
+
+    func loadAgentsFile() async {
+        isLoadingAgents = true
+        agentsError = nil
+        defer { isLoadingAgents = false }
+
+        let url = ClawdbotPaths.agentsURL
+        agentsPath = url.path
+        if FileManager.default.fileExists(atPath: url.path) {
+            do {
+                let text = try String(contentsOf: url, encoding: .utf8)
+                agentsText = text
+                agentsOriginalText = text
+            } catch {
+                agentsError = "Unable to load agents: \(error.localizedDescription)"
+                agentsText = ""
+                agentsOriginalText = ""
+            }
+        } else {
+            agentsError = "File not found"
+            agentsText = ""
+            agentsOriginalText = ""
+        }
+    }
+
+    func saveAgentsFile() async {
+        let url = ClawdbotPaths.agentsURL
+        agentsPath = url.path
+        do {
+            try FileManager.default.createDirectory(
+                at: ClawdbotPaths.stateDirURL,
+                withIntermediateDirectories: true
+            )
+            try agentsText.write(to: url, atomically: true, encoding: .utf8)
+            agentsOriginalText = agentsText
+            agentsError = nil
+        } catch {
+            agentsError = "Unable to save agents: \(error.localizedDescription)"
         }
     }
 
