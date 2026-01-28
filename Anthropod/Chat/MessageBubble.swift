@@ -12,17 +12,18 @@ struct MessageBubble: View {
     let message: Message
     let isGrouped: Bool
     let isLastInGroup: Bool
+    let layout: ChatLayout
 
     var body: some View {
         HStack(alignment: .bottom, spacing: LiquidGlass.Spacing.xs) {
             if message.isFromUser {
-                Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
+                Spacer(minLength: layout.bubbleMinMargin)
             }
             Text(message.content)
                 .font(LiquidGlass.Typography.messageBody)
                 .textSelection(.enabled)
-                .padding(.horizontal, LiquidGlass.Spacing.md)
-                .padding(.vertical, LiquidGlass.Spacing.sm)
+                .padding(.horizontal, layout.bubblePaddingH)
+                .padding(.vertical, layout.bubblePaddingV)
                 .background(bubbleBackground)
                 .clipShape(
                     RoundedRectangle(
@@ -38,7 +39,7 @@ struct MessageBubble: View {
                 }
 
             if !message.isFromUser {
-                Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
+                Spacer(minLength: layout.bubbleMinMargin)
             }
         }
     }
@@ -78,6 +79,7 @@ struct StreamingIndicator: View {
 
 struct AssistantMessageBubble: View {
     let message: Message
+    let layout: ChatLayout
 
     var body: some View {
         HStack(alignment: .bottom, spacing: LiquidGlass.Spacing.xs) {
@@ -85,8 +87,8 @@ struct AssistantMessageBubble: View {
                 if message.content.isEmpty && message.isStreaming {
                     // Show typing indicator when streaming with no content yet
                     StreamingIndicator()
-                        .padding(.horizontal, LiquidGlass.Spacing.md)
-                        .padding(.vertical, LiquidGlass.Spacing.sm)
+                        .padding(.horizontal, layout.bubblePaddingH)
+                        .padding(.vertical, layout.bubblePaddingV)
                         .background(LiquidGlass.Colors.assistantBubble)
                         .clipShape(
                             RoundedRectangle(
@@ -95,11 +97,11 @@ struct AssistantMessageBubble: View {
                             )
                         )
                 } else {
-                    MessageBubble(message: message, isGrouped: false, isLastInGroup: true)
+                    MessageBubble(message: message, isGrouped: false, isLastInGroup: true, layout: layout)
                 }
             }
 
-            Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
+            Spacer(minLength: layout.bubbleMinMargin)
         }
     }
 }
@@ -108,14 +110,15 @@ struct AssistantMessageBubble: View {
 
 struct StreamingAssistantBubble: View {
     let text: String
+    let layout: ChatLayout
 
     var body: some View {
         HStack(alignment: .bottom, spacing: LiquidGlass.Spacing.xs) {
             Text(text)
                 .font(LiquidGlass.Typography.messageBody)
                 .textSelection(.enabled)
-                .padding(.horizontal, LiquidGlass.Spacing.md)
-                .padding(.vertical, LiquidGlass.Spacing.sm)
+                .padding(.horizontal, layout.bubblePaddingH)
+                .padding(.vertical, layout.bubblePaddingV)
                 .background(LiquidGlass.Colors.assistantBubble)
                 .clipShape(
                     RoundedRectangle(
@@ -124,17 +127,19 @@ struct StreamingAssistantBubble: View {
                     )
                 )
 
-            Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
+            Spacer(minLength: layout.bubbleMinMargin)
         }
     }
 }
 
 struct StreamingTypingBubble: View {
+    let layout: ChatLayout
+
     var body: some View {
         HStack(alignment: .bottom, spacing: LiquidGlass.Spacing.xs) {
             StreamingIndicator()
-                .padding(.horizontal, LiquidGlass.Spacing.md)
-                .padding(.vertical, LiquidGlass.Spacing.sm)
+                .padding(.horizontal, layout.bubblePaddingH)
+                .padding(.vertical, layout.bubblePaddingV)
                 .background(LiquidGlass.Colors.assistantBubble)
                 .clipShape(
                     RoundedRectangle(
@@ -143,7 +148,7 @@ struct StreamingTypingBubble: View {
                     )
                 )
 
-            Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
+            Spacer(minLength: layout.bubbleMinMargin)
         }
     }
 }
@@ -163,16 +168,16 @@ struct BubbleTail: View {
 // MARK: - Previews
 
 #Preview("User Message") {
-    MessageBubble(message: .previewUser, isGrouped: false, isLastInGroup: true)
+    MessageBubble(message: .previewUser, isGrouped: false, isLastInGroup: true, layout: ChatLayout(isCompact: false))
         .padding()
 }
 
 #Preview("Assistant Message") {
-    MessageBubble(message: .previewAssistant, isGrouped: false, isLastInGroup: true)
+    MessageBubble(message: .previewAssistant, isGrouped: false, isLastInGroup: true, layout: ChatLayout(isCompact: false))
         .padding()
 }
 
 #Preview("Streaming") {
-    AssistantMessageBubble(message: Message.assistant("", isStreaming: true))
+    AssistantMessageBubble(message: Message.assistant("", isStreaming: true), layout: ChatLayout(isCompact: false))
         .padding()
 }

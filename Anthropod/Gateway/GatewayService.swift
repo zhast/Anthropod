@@ -146,6 +146,49 @@ final class GatewayService {
         return response.aborted ?? false
     }
 
+    // MARK: - Models & Usage
+
+    func modelsList() async throws -> [ModelChoice] {
+        guard let client else { throw GatewayError.notConnected }
+        let payload: ModelsListResult = try await client.requestDecoded(
+            method: "models.list",
+            params: nil,
+            timeoutMs: 7000
+        )
+        return payload.models
+    }
+
+    func usageCostSummary() async throws -> GatewayCostUsageSummary {
+        guard let client else { throw GatewayError.notConnected }
+        return try await client.requestDecoded(
+            method: "usage.cost",
+            params: nil,
+            timeoutMs: 7000
+        )
+    }
+
+    func patchSessionModel(sessionKey: String? = nil, modelId: String?) async throws {
+        guard let client else { throw GatewayError.notConnected }
+        let key = sessionKey ?? mainSessionKey
+        var params: [String: Any] = ["key": key]
+        if let modelId, !modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            params["model"] = modelId
+        } else {
+            params["model"] = NSNull()
+        }
+        _ = try await client.request(method: "sessions.patch", params: params, timeoutMs: 7000)
+    }
+
+    func compactSession(sessionKey: String? = nil, maxLines: Int = 400) async throws {
+        guard let client else { throw GatewayError.notConnected }
+        let key = sessionKey ?? mainSessionKey
+        _ = try await client.request(
+            method: "sessions.compact",
+            params: ["key": key, "maxLines": maxLines],
+            timeoutMs: 15000
+        )
+    }
+
     // MARK: - Event Handling
 
     func onAgentRun(_ handler: @escaping (AgentRunEvent) -> Void) {

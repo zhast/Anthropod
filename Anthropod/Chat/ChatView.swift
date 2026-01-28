@@ -19,6 +19,7 @@ struct ChatView: View {
     @State private var debugReport = ""
     @State private var didCopyDebug = false
     @State private var expandedGroupIds: Set<UUID> = []
+    @AppStorage(AnthropodDefaults.compactLayout) private var compactLayout = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -89,7 +90,7 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: LiquidGlass.Spacing.messageGroupGap) {
+                LazyVStack(spacing: layout.groupGap) {
                     // Empty state
                     if sessionMessages.isEmpty {
                         emptyState
@@ -99,21 +100,22 @@ struct ChatView: View {
                     ForEach(messageRows) { row in
                         switch row.kind {
                         case let .divider(date):
-                            DateDivider(date: date)
+                            DateDivider(date: date, layout: layout)
                         case let .group(group):
                             MessageGroupView(
                                 group: group,
                                 isExpanded: expandedGroupIds.contains(group.id),
+                                layout: layout,
                                 onToggle: { toggleGroup(group.id) }
                             )
                         }
                     }
 
                     if hasStreamingText, let text = viewModel.streamingAssistantText {
-                        StreamingAssistantBubble(text: text)
+                        StreamingAssistantBubble(text: text, layout: layout)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else if viewModel.isLoading {
-                        StreamingTypingBubble()
+                        StreamingTypingBubble(layout: layout)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
@@ -122,8 +124,8 @@ struct ChatView: View {
                         .frame(height: 1)
                         .id("bottom")
                 }
-                .padding(.horizontal, LiquidGlass.Spacing.lg)
-                .padding(.top, LiquidGlass.Spacing.lg)
+                .padding(.horizontal, layout.listHorizontalPadding)
+                .padding(.top, layout.listTopPadding)
                 .padding(.bottom, LiquidGlass.Spacing.scrollBottomInset)
             }
             .scrollDismissesKeyboard(.interactively)
@@ -231,17 +233,18 @@ struct ChatView: View {
     private struct MessageGroupView: View {
         let group: MessageGroup
         let isExpanded: Bool
+        let layout: ChatLayout
         let onToggle: () -> Void
 
         var body: some View {
             VStack(
                 alignment: group.isFromUser ? .trailing : .leading,
-                spacing: LiquidGlass.Spacing.messageStackSpacing
+                spacing: layout.stackSpacing
             ) {
                 ForEach(Array(group.messages.enumerated()), id: \.element.id) { index, message in
                     let isGrouped = group.messages.count > 1
                     let isLast = index == group.messages.count - 1
-                    MessageBubble(message: message, isGrouped: isGrouped, isLastInGroup: isLast)
+                    MessageBubble(message: message, isGrouped: isGrouped, isLastInGroup: isLast, layout: layout)
                         .frame(
                             maxWidth: .infinity,
                             alignment: group.isFromUser ? .trailing : .leading
@@ -253,7 +256,7 @@ struct ChatView: View {
                     Text(group.lastTimestamp, style: .time)
                         .font(LiquidGlass.Typography.timestamp)
                         .foregroundStyle(LiquidGlass.Colors.secondaryText)
-                        .offset(y: -14)
+                        .offset(y: layout.timestampOffsetY)
                         .transition(.opacity)
                 }
             }
@@ -268,6 +271,7 @@ struct ChatView: View {
 
     private struct DateDivider: View {
         let date: Date
+        let layout: ChatLayout
 
         var body: some View {
             HStack(spacing: LiquidGlass.Spacing.sm) {
@@ -284,7 +288,7 @@ struct ChatView: View {
                 line
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, LiquidGlass.Spacing.xs)
+            .padding(.vertical, layout.dividerVerticalPadding)
         }
 
         private var line: some View {
@@ -440,6 +444,10 @@ struct ChatView: View {
             )
         }
     }
+
+    private var layout: ChatLayout {
+        ChatLayout(isCompact: compactLayout)
+    }
 }
 
 // MARK: - Chat View with Voice
@@ -452,19 +460,20 @@ struct ChatViewWithVoice: View {
     @State private var showDebugOverlay = false
     @State private var debugReport = ""
     @State private var didCopyDebug = false
+    @AppStorage(AnthropodDefaults.compactLayout) private var compactLayout = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
             // Content layer
             ScrollViewReader { proxy in
                 ScrollView {
-                LazyVStack(spacing: LiquidGlass.Spacing.messageGroupGap) {
+                LazyVStack(spacing: layout.groupGap) {
                         if messages.isEmpty {
                             emptyState
                         }
 
                         ForEach(messages) { message in
-                            MessageBubble(message: message, isGrouped: false, isLastInGroup: true)
+                            MessageBubble(message: message, isGrouped: false, isLastInGroup: true, layout: layout)
                                 .id(message.id)
                         }
 
@@ -472,8 +481,8 @@ struct ChatViewWithVoice: View {
                             .frame(height: 1)
                             .id("bottom")
                     }
-                    .padding(.horizontal, LiquidGlass.Spacing.lg)
-                    .padding(.top, LiquidGlass.Spacing.lg)
+                    .padding(.horizontal, layout.listHorizontalPadding)
+                    .padding(.top, layout.listTopPadding)
                     .padding(.bottom, LiquidGlass.Spacing.scrollBottomInset)
                 }
                 .scrollDismissesKeyboard(.interactively)
@@ -568,6 +577,10 @@ struct ChatViewWithVoice: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.ultraThinMaterial)
+    }
+
+    private var layout: ChatLayout {
+        ChatLayout(isCompact: compactLayout)
     }
 
     private var debugOverlay: some View {

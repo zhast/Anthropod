@@ -33,5 +33,9 @@ struct AnthropodApp: App {
             width: LiquidGlass.Window.defaultWidth,
             height: LiquidGlass.Window.defaultHeight
         )
+
+        Settings {
+            SettingsView()
+        }
     }
 }

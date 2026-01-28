@@ -36,6 +36,10 @@ final class ChatViewModel {
     /// Local ordering for new messages before history refresh
     private var nextSortIndex: Int = 0
 
+    /// Track last applied model to avoid redundant patches
+    private var lastAppliedModelId: String?
+    private var lastAppliedSessionKey: String?
+
     // MARK: - Dependencies
 
     private var modelContext: ModelContext?
@@ -65,6 +69,7 @@ final class ChatViewModel {
 
         if isConnected {
             await resumeGatewaySession()
+            await applyPreferredModelIfNeeded()
         }
     }
 
@@ -113,6 +118,7 @@ final class ChatViewModel {
         streamingAssistantText = nil
         gatewaySessionKey = nil
         nextSortIndex = 0
+        lastAppliedSessionKey = nil
     }
 
     func abortCurrentRun() async {
@@ -260,6 +266,7 @@ final class ChatViewModel {
         if !event.sessionKey.isEmpty, event.sessionKey != gatewaySessionKey {
             gatewaySessionKey = event.sessionKey
             currentSessionId = stableSessionId(for: event.sessionKey)
+            Task { await applyPreferredModelIfNeeded() }
         }
 
         if event.isComplete {
@@ -280,6 +287,37 @@ final class ChatViewModel {
         let isAssistant = stream == "assistant" || stream.hasPrefix("assistant.")
         if isAssistant, let text = event.text ?? event.rawText {
             streamingAssistantText = text
+        }
+    }
+
+    private func applyPreferredModelIfNeeded() async {
+        let stored = UserDefaults.standard.string(forKey: AnthropodDefaults.preferredModelId) ?? ""
+        let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sessionKey: String = {
+            if let key = gatewaySessionKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !key.isEmpty
+            {
+                return key
+            }
+            return gateway.mainSessionKey
+        }()
+
+        if trimmed.isEmpty {
+            lastAppliedModelId = nil
+            lastAppliedSessionKey = sessionKey
+            return
+        }
+
+        if lastAppliedModelId == trimmed, lastAppliedSessionKey == sessionKey {
+            return
+        }
+
+        do {
+            try await gateway.patchSessionModel(sessionKey: sessionKey, modelId: trimmed)
+            lastAppliedModelId = trimmed
+            lastAppliedSessionKey = sessionKey
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

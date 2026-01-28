@@ -249,6 +249,30 @@ struct ChatSendResponse: Decodable, Sendable {
     nonisolated let status: String?
 }
 
+// MARK: - Models
+
+@preconcurrency
+struct ModelChoice: Decodable, Sendable, Identifiable, Hashable {
+    nonisolated let id: String
+    nonisolated let name: String
+    nonisolated let provider: String
+    nonisolated let contextWindow: Int?
+    nonisolated let reasoning: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case provider
+        case contextWindow
+        case reasoning
+    }
+}
+
+@preconcurrency
+struct ModelsListResult: Decodable, Sendable {
+    nonisolated let models: [ModelChoice]
+}
+
 // MARK: - Gateway Push Events
 
 enum GatewayPush: Sendable {
