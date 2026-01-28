@@ -24,7 +24,7 @@ struct AnthropodApp: App {
     }()
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "chat") {
             ChatView()
         }
         .modelContainer(sharedModelContainer)
@@ -41,6 +41,11 @@ struct AnthropodApp: App {
             SettingsView()
         }
         .defaultSize(width: 700, height: 480)
+
+        MenuBarExtra("Anthropod", systemImage: "bubble.left.and.bubble.right") {
+            MenuBarContentView()
+        }
+        .menuBarExtraStyle(.menu)
     }
 }
 
