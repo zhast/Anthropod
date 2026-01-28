@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Foundation
+import Charts
 
 struct SettingsView: View {
     @State private var model = SettingsViewModel()
@@ -228,43 +229,182 @@ private struct UsageSummaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            LabeledContent("Total cost", value: CostUsageFormatting.formatUsd(summary.totals.totalCost) ?? "–")
-            LabeledContent("Total tokens", value: CostUsageFormatting.formatTokenCount(summary.totals.totalTokens) ?? "–")
-            LabeledContent("Input", value: CostUsageFormatting.formatTokenCount(summary.totals.input) ?? "–")
-            LabeledContent("Output", value: CostUsageFormatting.formatTokenCount(summary.totals.output) ?? "–")
-            LabeledContent("Cache read", value: CostUsageFormatting.formatTokenCount(summary.totals.cacheRead) ?? "–")
-            LabeledContent("Cache write", value: CostUsageFormatting.formatTokenCount(summary.totals.cacheWrite) ?? "–")
-
-            if let updated = updatedAtText {
-                Text("Updated \(updated)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if !summary.daily.isEmpty {
-                Divider()
-                Text("Recent days")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                ForEach(summary.daily.prefix(7), id: \.date) { entry in
-                    HStack {
-                        Text(entry.date)
-                            .font(.caption)
-                        Spacer()
-                        Text(CostUsageFormatting.formatUsd(entry.totalCost) ?? "–")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            if !chartDays.isEmpty {
+                Chart {
+                    ForEach(chartDays) { day in
+                        LineMark(
+                            x: .value("Day", day.date),
+                            y: .value("Cost", day.cost)
+                        )
+                        .interpolationMethod(.catmullRom)
+                        PointMark(
+                            x: .value("Day", day.date),
+                            y: .value("Cost", day.cost)
+                        )
                     }
                 }
+                .chartXScale(domain: chartDomain)
+                .chartYScale(domain: chartCostDomain)
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisGridLine()
+                        if let cost = value.as(Double.self),
+                           let label = CostUsageFormatting.formatUsd(cost)
+                        {
+                            AxisValueLabel(label)
+                        }
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .day, count: 3)) { value in
+                        if let date = value.as(Date.self) {
+                            AxisValueLabel(Self.chartLabelFormatter.string(from: date))
+                        }
+                        AxisTick()
+                        AxisGridLine()
+                    }
+                }
+                .frame(height: 140)
             }
+
+            UsageCardStatsView(metrics: metrics)
         }
     }
 
-    private var updatedAtText: String? {
-        let seconds = summary.updatedAt > 10_000_000_000 ? summary.updatedAt / 1000 : summary.updatedAt
-        guard seconds.isFinite else { return nil }
-        let date = Date(timeIntervalSince1970: seconds)
-        return date.formatted(date: .abbreviated, time: .shortened)
+    struct Metric: Identifiable {
+        let id = UUID()
+        let title: String
+        let value: String
+        let isPrimary: Bool
+    }
+
+    private var metrics: [Metric] {
+        var list: [Metric] = [
+            Metric(
+                title: "Cost",
+                value: CostUsageFormatting.formatUsd(summary.totals.totalCost) ?? "–",
+                isPrimary: true
+            ),
+            Metric(
+                title: "Tokens",
+                value: CostUsageFormatting.formatTokenCount(summary.totals.totalTokens) ?? "–",
+                isPrimary: true
+            ),
+            Metric(
+                title: "Input",
+                value: CostUsageFormatting.formatTokenCount(summary.totals.input) ?? "–",
+                isPrimary: false
+            ),
+            Metric(
+                title: "Output",
+                value: CostUsageFormatting.formatTokenCount(summary.totals.output) ?? "–",
+                isPrimary: false
+            )
+        ]
+        if summary.totals.cacheRead > 0 {
+            list.append(
+                Metric(
+                    title: "Cache read",
+                    value: CostUsageFormatting.formatTokenCount(summary.totals.cacheRead) ?? "–",
+                    isPrimary: false
+                )
+            )
+        }
+        if summary.totals.cacheWrite > 0 {
+            list.append(
+                Metric(
+                    title: "Cache write",
+                    value: CostUsageFormatting.formatTokenCount(summary.totals.cacheWrite) ?? "–",
+                    isPrimary: false
+                )
+            )
+        }
+        return list
+    }
+
+    private struct ChartDay: Identifiable {
+        let id = UUID()
+        let date: Date
+        let cost: Double
+    }
+
+    private var chartDays: [ChartDay] {
+        let mapped = summary.daily.compactMap { entry -> ChartDay? in
+            guard let date = Self.inputDateFormatter.date(from: entry.date) else { return nil }
+            return ChartDay(
+                date: date,
+                cost: entry.totalCost
+            )
+        }
+        let sorted = mapped.sorted { $0.date < $1.date }
+        return Array(sorted.suffix(14))
+    }
+
+    private var chartCostDomain: ClosedRange<Double> {
+        let values = chartDays.map(\.cost)
+        guard let minValue = values.min(), let maxValue = values.max() else {
+            return 0...1
+        }
+        let range = maxValue - minValue
+        let minRange = max(0.01, maxValue * 0.2)
+        let effectiveRange = max(range, minRange)
+        let mid = (minValue + maxValue) / 2.0
+        var lower = mid - (effectiveRange / 2.0)
+        var upper = mid + (effectiveRange / 2.0)
+        if lower < 0 {
+            upper += -lower
+            lower = 0
+        }
+        if lower == upper {
+            upper = lower + minRange
+        }
+        return lower...upper
+    }
+
+    private static let inputDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let chartLabelFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.setLocalizedDateFormatFromTemplate("MMM d")
+        return formatter
+    }()
+    private var chartDomain: ClosedRange<Date> {
+        let calendar = Calendar.current
+        let end = calendar.startOfDay(for: Date())
+        let start = calendar.date(byAdding: .day, value: -13, to: end) ?? end
+        return start...end
+    }
+}
+
+private struct UsageCardStatsView: View {
+    let metrics: [UsageSummaryView.Metric]
+
+    var body: some View {
+        let columns = [
+            GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 8, alignment: .leading)
+        ]
+
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            ForEach(metrics) { metric in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(metric.title)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(metric.value)
+                        .font(metric.isPrimary ? .headline.weight(.semibold) : .subheadline)
+                        .monospacedDigit()
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
     }
 }
