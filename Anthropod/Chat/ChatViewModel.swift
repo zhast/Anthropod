@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import CryptoKit
 
 @MainActor
 @Observable
@@ -22,6 +23,9 @@ final class ChatViewModel {
 
     /// Current session for message grouping
     var currentSessionId: UUID = UUID()
+
+    /// Gateway session key currently loaded
+    private var gatewaySessionKey: String?
 
     /// Current run ID for streaming response
     private var currentRunId: String?
@@ -53,7 +57,16 @@ final class ChatViewModel {
 
         if let error = gateway.connectionError {
             errorMessage = error
+            return
         }
+
+        if isConnected {
+            await resumeGatewaySession()
+        }
+    }
+
+    func debugReport() async -> String {
+        await gateway.debugReport()
     }
 
     // MARK: - Actions
@@ -97,6 +110,7 @@ final class ChatViewModel {
         currentSessionId = UUID()
         currentRunId = nil
         currentAssistantMessage = nil
+        gatewaySessionKey = nil
     }
 
     func abortCurrentRun() async {
@@ -119,6 +133,69 @@ final class ChatViewModel {
                 self?.handleAgentRunEvent(event)
             }
         }
+        gateway.onChatEvent { [weak self] event in
+            Task { @MainActor in
+                self?.handleChatEvent(event)
+            }
+        }
+        gateway.onAgentEvent { [weak self] event in
+            Task { @MainActor in
+                self?.handleAgentEvent(event)
+            }
+        }
+    }
+
+    private func resumeGatewaySession(sessionKey overrideKey: String? = nil) async {
+        guard let modelContext else { return }
+        let baseKey = overrideKey ?? gateway.mainSessionKey
+        let sessionKey = baseKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sessionKey.isEmpty else { return }
+
+        if gatewaySessionKey != sessionKey {
+            gatewaySessionKey = sessionKey
+        }
+        let sessionId = stableSessionId(for: sessionKey)
+        currentSessionId = sessionId
+
+        do {
+            let history = try await gateway.chatHistory(sessionKey: sessionKey, limit: 200)
+            let descriptor = FetchDescriptor<Message>(
+                predicate: #Predicate { message in
+                    message.sessionId == sessionId
+                }
+            )
+            if let existing = try? modelContext.fetch(descriptor) {
+                for message in existing {
+                    modelContext.delete(message)
+                }
+            }
+
+            for entry in history {
+                let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+                let message = Message(
+                    content: trimmed,
+                    isFromUser: entry.isUser,
+                    timestamp: entry.timestamp,
+                    sessionId: sessionId
+                )
+                modelContext.insert(message)
+            }
+            try? modelContext.save()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func stableSessionId(for key: String) -> UUID {
+        let hash = SHA256.hash(data: Data(key.utf8))
+        let bytes = Array(hash)
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
     }
 
     private func sendToGateway(message: String, assistantMessage: Message) async {
@@ -137,6 +214,17 @@ final class ChatViewModel {
         do {
             let runId = try await gateway.chatSend(message: message)
             currentRunId = runId
+            let snapshotRunId = runId
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                await MainActor.run {
+                    guard let self else { return }
+                    guard self.currentRunId == snapshotRunId else { return }
+                    if self.currentAssistantMessage?.content.isEmpty == true {
+                        Task { await self.resumeGatewaySession() }
+                    }
+                }
+            }
         } catch {
             assistantMessage.content = "Error: \(error.localizedDescription)"
             assistantMessage.isStreaming = false
@@ -162,6 +250,43 @@ final class ChatViewModel {
             if let error = event.error {
                 errorMessage = error
             }
+        }
+    }
+
+    private func handleChatEvent(_ event: ChatRunEvent) {
+        if !event.sessionKey.isEmpty, event.sessionKey != gatewaySessionKey {
+            gatewaySessionKey = event.sessionKey
+            currentSessionId = stableSessionId(for: event.sessionKey)
+        }
+
+        if event.isComplete {
+            if let error = event.errorMessage, !error.isEmpty {
+                errorMessage = error
+            }
+            currentAssistantMessage?.isStreaming = false
+            isLoading = false
+            currentRunId = nil
+            Task { await resumeGatewaySession(sessionKey: event.sessionKey) }
+        }
+    }
+
+    private func handleAgentEvent(_ event: AgentStreamEvent) {
+        guard !event.runId.isEmpty else { return }
+        if let currentRunId, event.runId == currentRunId {
+            // ok
+        } else if let sessionKey = event.sessionKey,
+                  let gatewaySessionKey,
+                  sessionKey == gatewaySessionKey
+        {
+            // Accept events scoped to the current session when runId doesn't match.
+        } else {
+            return
+        }
+
+        let stream = event.stream.lowercased()
+        let isAssistant = stream == "assistant" || stream.hasPrefix("assistant.")
+        if isAssistant, let text = event.text ?? event.rawText {
+            currentAssistantMessage?.content = text
         }
     }
 }

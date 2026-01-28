@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 import SwiftData
 
 struct ChatView: View {
@@ -14,6 +15,9 @@ struct ChatView: View {
 
     @State private var viewModel = ChatViewModel()
     @State private var scrolledToBottom = true
+    @State private var showDebugOverlay = false
+    @State private var debugReport = ""
+    @State private var didCopyDebug = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -27,6 +31,10 @@ struct ChatView: View {
             if viewModel.isConnecting {
                 connectionOverlay
             }
+
+            if showDebugOverlay {
+                debugOverlay
+            }
         }
         .frame(
             minWidth: LiquidGlass.Window.minWidth,
@@ -35,6 +43,17 @@ struct ChatView: View {
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 connectionStatusIndicator
+            }
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    Task {
+                        debugReport = await viewModel.debugReport()
+                        showDebugOverlay = true
+                    }
+                } label: {
+                    Image(systemName: "ladybug")
+                }
+                .help("Show connection debug info")
             }
         }
         .onAppear {
@@ -48,6 +67,12 @@ struct ChatView: View {
             set: { if !$0 { viewModel.clearError() } }
         )) {
             Button("OK") { viewModel.clearError() }
+            Button("Debug") {
+                Task {
+                    debugReport = await viewModel.debugReport()
+                    showDebugOverlay = true
+                }
+            }
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
@@ -152,6 +177,63 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.ultraThinMaterial)
     }
+
+    private var debugOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: LiquidGlass.Spacing.md) {
+                HStack {
+                    Text("Gateway Debug Info")
+                        .font(.headline)
+                    Spacer()
+                    Button("Refresh") {
+                        Task {
+                            debugReport = await viewModel.debugReport()
+                        }
+                    }
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(debugReport, forType: .string)
+                        didCopyDebug = true
+                        Task {
+                            try? await Task.sleep(nanoseconds: 1_000_000_000)
+                            didCopyDebug = false
+                        }
+                    }
+                    Button("Close") {
+                        showDebugOverlay = false
+                    }
+                }
+
+                if didCopyDebug {
+                    Text("Copied to clipboard")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                ScrollView {
+                    Text(debugReport.isEmpty ? "No debug info yet." : debugReport)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, LiquidGlass.Spacing.sm)
+                }
+                .frame(maxWidth: .infinity, maxHeight: 320)
+                .background(Color.black.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .padding(LiquidGlass.Spacing.lg)
+            .frame(maxWidth: 640)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.black.opacity(0.05))
+            )
+        }
+    }
 }
 
 // MARK: - Chat View with Voice
@@ -161,6 +243,9 @@ struct ChatViewWithVoice: View {
     @Query(sort: \Message.timestamp) private var messages: [Message]
 
     @State private var viewModel = ChatViewModel()
+    @State private var showDebugOverlay = false
+    @State private var debugReport = ""
+    @State private var didCopyDebug = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -209,6 +294,10 @@ struct ChatViewWithVoice: View {
             if viewModel.isConnecting {
                 connectionOverlay
             }
+
+            if showDebugOverlay {
+                debugOverlay
+            }
         }
         .frame(
             minWidth: LiquidGlass.Window.minWidth,
@@ -218,6 +307,19 @@ struct ChatViewWithVoice: View {
             viewModel.configure(with: modelContext)
             Task {
                 await viewModel.connectToGateway()
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    Task {
+                        debugReport = await viewModel.debugReport()
+                        showDebugOverlay = true
+                    }
+                } label: {
+                    Image(systemName: "ladybug")
+                }
+                .help("Show connection debug info")
             }
         }
     }
@@ -257,6 +359,63 @@ struct ChatViewWithVoice: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.ultraThinMaterial)
+    }
+
+    private var debugOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: LiquidGlass.Spacing.md) {
+                HStack {
+                    Text("Gateway Debug Info")
+                        .font(.headline)
+                    Spacer()
+                    Button("Refresh") {
+                        Task {
+                            debugReport = await viewModel.debugReport()
+                        }
+                    }
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(debugReport, forType: .string)
+                        didCopyDebug = true
+                        Task {
+                            try? await Task.sleep(nanoseconds: 1_000_000_000)
+                            didCopyDebug = false
+                        }
+                    }
+                    Button("Close") {
+                        showDebugOverlay = false
+                    }
+                }
+
+                if didCopyDebug {
+                    Text("Copied to clipboard")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                ScrollView {
+                    Text(debugReport.isEmpty ? "No debug info yet." : debugReport)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, LiquidGlass.Spacing.sm)
+                }
+                .frame(maxWidth: .infinity, maxHeight: 320)
+                .background(Color.black.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .padding(LiquidGlass.Spacing.lg)
+            .frame(maxWidth: 640)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.black.opacity(0.05))
+            )
+        }
     }
 }
 

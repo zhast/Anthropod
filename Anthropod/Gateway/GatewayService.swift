@@ -28,14 +28,12 @@ final class GatewayService {
     var gatewayHost: String = "127.0.0.1"
     var gatewayPort: Int = 18789
 
-    var gatewayURL: URL {
-        URL(string: "ws://\(gatewayHost):\(gatewayPort)")!
-    }
-
     // MARK: - Private
 
     private var client: GatewayClient?
-    private var eventHandlers: [(AgentRunEvent) -> Void] = []
+    private var agentRunHandlers: [(AgentRunEvent) -> Void] = []
+    private var chatHandlers: [(ChatRunEvent) -> Void] = []
+    private var agentHandlers: [(AgentStreamEvent) -> Void] = []
 
     private init() {}
 
@@ -47,7 +45,19 @@ final class GatewayService {
         isConnecting = true
         connectionError = nil
 
-        let newClient = GatewayClient(url: gatewayURL)
+        let endpoint = await GatewayEndpointStore.shared.resolve(
+            fallbackHost: gatewayHost,
+            fallbackPort: gatewayPort
+        )
+        let ready = await GatewayProcessManager.shared.ensureGatewayRunning(endpoint: endpoint)
+        if !ready {
+            connectionError = "Gateway did not become ready"
+            isConnected = false
+            isConnecting = false
+            return
+        }
+
+        let newClient = GatewayClient(url: endpoint.url, token: endpoint.token, password: endpoint.password)
         await newClient.setPushHandler { [weak self] push in
             await self?.handlePush(push)
         }
@@ -61,7 +71,7 @@ final class GatewayService {
                 mainSessionKey = sessionKey
             }
 
-            logger.info("Connected to gateway at \(self.gatewayURL.absoluteString, privacy: .public)")
+            logger.info("Connected to gateway at \(endpoint.url.absoluteString, privacy: .public)")
         } catch {
             connectionError = error.localizedDescription
             isConnected = false
@@ -80,7 +90,7 @@ final class GatewayService {
     // MARK: - Chat API
 
     /// Fetch chat history for a session
-    func chatHistory(sessionKey: String? = nil, limit: Int = 100) async throws -> [ChatMessage] {
+    func chatHistory(sessionKey: String? = nil, limit: Int = 200) async throws -> [GatewayChatHistoryMessage] {
         guard let client else { throw GatewayError.notConnected }
 
         let key = sessionKey ?? mainSessionKey
@@ -102,7 +112,7 @@ final class GatewayService {
         let key = sessionKey ?? mainSessionKey
         let idempotencyKey = UUID().uuidString
 
-        let response: ChatSendResponse = try await client.requestDecoded(
+        let response: ChatSendResponse? = try await client.requestDecodedOptional(
             method: "chat.send",
             params: [
                 "sessionKey": key,
@@ -114,7 +124,7 @@ final class GatewayService {
             timeoutMs: 35000
         )
 
-        return response.runId ?? idempotencyKey
+        return response?.runId ?? idempotencyKey
     }
 
     /// Abort an in-progress chat
@@ -139,7 +149,15 @@ final class GatewayService {
     // MARK: - Event Handling
 
     func onAgentRun(_ handler: @escaping (AgentRunEvent) -> Void) {
-        eventHandlers.append(handler)
+        agentRunHandlers.append(handler)
+    }
+
+    func onChatEvent(_ handler: @escaping (ChatRunEvent) -> Void) {
+        chatHandlers.append(handler)
+    }
+
+    func onAgentEvent(_ handler: @escaping (AgentStreamEvent) -> Void) {
+        agentHandlers.append(handler)
     }
 
     private func handlePush(_ push: GatewayPush) async {
@@ -153,15 +171,103 @@ final class GatewayService {
                 }
 
             case let .event(evt):
-                if let agentEvent = AgentRunEvent(from: evt) {
-                    for handler in self.eventHandlers {
+                if let agentRun = AgentRunEvent(from: evt) {
+                    for handler in self.agentRunHandlers {
+                        handler(agentRun)
+                    }
+                    return
+                }
+                if let chatEvent = ChatRunEvent(from: evt) {
+                    for handler in self.chatHandlers {
+                        handler(chatEvent)
+                    }
+                    return
+                }
+                if let agentEvent = AgentStreamEvent(from: evt) {
+                    for handler in self.agentHandlers {
                         handler(agentEvent)
                     }
+                    return
                 }
 
             case .seqGap:
                 logger.warning("Sequence gap detected")
             }
         }
+    }
+
+    // MARK: - Debug Report
+
+    func debugReport() async -> String {
+        let endpoint = await GatewayEndpointStore.shared.resolve(
+            fallbackHost: gatewayHost,
+            fallbackPort: gatewayPort
+        )
+        let processManager = GatewayProcessManager.shared
+        let env = ProcessInfo.processInfo.environment
+        let configPath = ClawdbotConfigFile.url().path
+        let launchdSnapshot = GatewayLaunchAgent.snapshot()
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        var lines: [String] = []
+        lines.append("timestamp: \(now)")
+        lines.append("endpoint.url: \(endpoint.url.absoluteString)")
+        lines.append("endpoint.token: \(redact(endpoint.token))")
+        lines.append("endpoint.password: \(redact(endpoint.password))")
+        lines.append("config.path: \(configPath)")
+        lines.append("config.gateway.mode: \(ClawdbotConfigFile.gatewayMode() ?? "n/a")")
+        lines.append("config.gateway.port: \(ClawdbotConfigFile.gatewayPort().map(String.init) ?? "n/a")")
+        lines.append("config.gateway.auth.token: \(redact(ClawdbotConfigFile.gatewayAuthToken()))")
+        lines.append("config.gateway.auth.password: \(redact(ClawdbotConfigFile.gatewayAuthPassword()))")
+        lines.append("launchd.gateway.port: \(launchdSnapshot?.port.map(String.init) ?? "n/a")")
+        lines.append("launchd.gateway.token: \(redact(launchdSnapshot?.token))")
+        lines.append("launchd.gateway.password: \(redact(launchdSnapshot?.password))")
+        lines.append("gateway.status: \(processManager.status.label)")
+        lines.append("gateway.command: \(processManager.lastCommandDescription ?? "n/a")")
+        lines.append("gateway.lastProbe: \(processManager.lastProbe ?? "n/a")")
+        lines.append("gateway.startError: \(processManager.lastStartError ?? "n/a")")
+        lines.append("gateway.readyError: \(processManager.lastReadyError ?? "n/a")")
+        lines.append("state.isConnected: \(isConnected)")
+        lines.append("state.isConnecting: \(isConnecting)")
+        lines.append("state.error: \(connectionError ?? "n/a")")
+        lines.append("env.CLAWDBOT_GATEWAY_URL: \(envValue(env, key: "CLAWDBOT_GATEWAY_URL"))")
+        lines.append("env.CLAWDBOT_GATEWAY_HOST: \(envValue(env, key: "CLAWDBOT_GATEWAY_HOST"))")
+        lines.append("env.CLAWDBOT_GATEWAY_PORT: \(envValue(env, key: "CLAWDBOT_GATEWAY_PORT"))")
+        lines.append("env.CLAWDBOT_GATEWAY_SCHEME: \(envValue(env, key: "CLAWDBOT_GATEWAY_SCHEME"))")
+        lines.append("env.CLAWDBOT_GATEWAY_TOKEN: \(redact(env["CLAWDBOT_GATEWAY_TOKEN"]))")
+        lines.append("env.CLAWDBOT_GATEWAY_PASSWORD: \(redact(env["CLAWDBOT_GATEWAY_PASSWORD"]))")
+        lines.append("env.ANTHROPOD_GATEWAY_COMMAND: \(envValue(env, key: "ANTHROPOD_GATEWAY_COMMAND"))")
+        lines.append("env.ANTHROPOD_GATEWAY_ARGS: \(envValue(env, key: "ANTHROPOD_GATEWAY_ARGS"))")
+        lines.append("env.ANTHROPOD_GATEWAY_CWD: \(envValue(env, key: "ANTHROPOD_GATEWAY_CWD"))")
+        lines.append("env.ANTHROPOD_MOLTBOT_ROOT: \(envValue(env, key: "ANTHROPOD_MOLTBOT_ROOT"))")
+        if let client {
+            let trace = await client.traceSnapshot()
+            if !trace.isEmpty {
+                lines.append("trace.enabled: true")
+                lines.append("trace.tail:")
+                lines.append(trace)
+            } else {
+                lines.append("trace.enabled: false")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func redact(_ value: String?) -> String {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return "n/a"
+        }
+        if trimmed.count <= 8 {
+            return "****"
+        }
+        let prefix = trimmed.prefix(3)
+        let suffix = trimmed.suffix(3)
+        return "\(prefix)…\(suffix)"
+    }
+
+    private func envValue(_ env: [String: String], key: String) -> String {
+        let raw = env[key]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? "n/a" : raw
     }
 }
