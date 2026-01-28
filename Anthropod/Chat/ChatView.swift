@@ -43,18 +43,21 @@ struct ChatView: View {
         )
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                connectionStatusIndicator
+                connectionStatusPill
             }
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    Task {
-                        debugReport = await viewModel.debugReport()
-                        showDebugOverlay = true
+            if showDebugButton {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        Task {
+                            debugReport = await viewModel.debugReport()
+                            showDebugOverlay = true
+                        }
+                    } label: {
+                        Image(systemName: "ladybug")
                     }
-                } label: {
-                    Image(systemName: "ladybug")
+                    .keyboardShortcut("d", modifiers: [.command, .option])
+                    .help("Show connection debug info")
                 }
-                .help("Show connection debug info")
             }
         }
         .onAppear {
@@ -68,10 +71,12 @@ struct ChatView: View {
             set: { if !$0 { viewModel.clearError() } }
         )) {
             Button("OK") { viewModel.clearError() }
-            Button("Debug") {
-                Task {
-                    debugReport = await viewModel.debugReport()
-                    showDebugOverlay = true
+            if showDebugButton {
+                Button("Debug") {
+                    Task {
+                        debugReport = await viewModel.debugReport()
+                        showDebugOverlay = true
+                    }
                 }
             }
         } message: {
@@ -84,7 +89,7 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: LiquidGlass.Spacing.messagePadding) {
+                LazyVStack(spacing: LiquidGlass.Spacing.messageGroupGap) {
                     // Empty state
                     if sessionMessages.isEmpty {
                         emptyState
@@ -231,10 +236,12 @@ struct ChatView: View {
         var body: some View {
             VStack(
                 alignment: group.isFromUser ? .trailing : .leading,
-                spacing: LiquidGlass.Spacing.xxs
+                spacing: LiquidGlass.Spacing.messageStackSpacing
             ) {
-                ForEach(group.messages) { message in
-                    MessageBubble(message: message)
+                ForEach(Array(group.messages.enumerated()), id: \.element.id) { index, message in
+                    let isGrouped = group.messages.count > 1
+                    let isLast = index == group.messages.count - 1
+                    MessageBubble(message: message, isGrouped: isGrouped, isLastInGroup: isLast)
                         .frame(
                             maxWidth: .infinity,
                             alignment: group.isFromUser ? .trailing : .leading
@@ -292,6 +299,14 @@ struct ChatView: View {
         return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var showDebugButton: Bool {
+#if DEBUG
+        return true
+#else
+        return false
+#endif
+    }
+
     // MARK: - Input Bar
 
     private var inputBar: some View {
@@ -332,16 +347,28 @@ struct ChatView: View {
 
     // MARK: - Connection Status
 
-    private var connectionStatusIndicator: some View {
-        HStack(spacing: 6) {
+    private var connectionStatusPill: some View {
+        let status = connectionStatus
+        return HStack(spacing: 6) {
             Circle()
-                .fill(viewModel.isConnected ? Color.green : Color.orange)
-                .frame(width: 8, height: 8)
-
-            Text(viewModel.isConnected ? "Connected" : "Disconnected")
+                .fill(status.color)
+                .frame(width: 6, height: 6)
+            Text(status.title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(status.color)
         }
+        .padding(.horizontal, 6)
+        .animation(LiquidGlass.Animation.quick, value: status.title)
+    }
+
+    private var connectionStatus: (title: String, color: Color) {
+        if viewModel.isConnecting {
+            return ("Connecting", .orange)
+        }
+        if let error = viewModel.errorMessage, !error.isEmpty {
+            return ("Error", .red)
+        }
+        return viewModel.isConnected ? ("Connected", .green) : ("Offline", .secondary)
     }
 
     private var connectionOverlay: some View {
@@ -431,13 +458,13 @@ struct ChatViewWithVoice: View {
             // Content layer
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: LiquidGlass.Spacing.messagePadding) {
+                LazyVStack(spacing: LiquidGlass.Spacing.messageGroupGap) {
                         if messages.isEmpty {
                             emptyState
                         }
 
                         ForEach(messages) { message in
-                            MessageBubble(message: message)
+                            MessageBubble(message: message, isGrouped: false, isLastInGroup: true)
                                 .id(message.id)
                         }
 
@@ -489,16 +516,19 @@ struct ChatViewWithVoice: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    Task {
-                        debugReport = await viewModel.debugReport()
-                        showDebugOverlay = true
+            if showDebugButton {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        Task {
+                            debugReport = await viewModel.debugReport()
+                            showDebugOverlay = true
+                        }
+                    } label: {
+                        Image(systemName: "ladybug")
                     }
-                } label: {
-                    Image(systemName: "ladybug")
+                    .keyboardShortcut("d", modifiers: [.command, .option])
+                    .help("Show connection debug info")
                 }
-                .help("Show connection debug info")
             }
         }
     }
@@ -596,6 +626,15 @@ struct ChatViewWithVoice: View {
             )
         }
     }
+
+    private var showDebugButton: Bool {
+#if DEBUG
+        return true
+#else
+        return false
+#endif
+    }
+
 }
 
 // MARK: - Previews

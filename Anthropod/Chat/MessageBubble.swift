@@ -10,6 +10,8 @@ import Combine
 
 struct MessageBubble: View {
     let message: Message
+    let isGrouped: Bool
+    let isLastInGroup: Bool
 
     var body: some View {
         HStack(alignment: .bottom, spacing: LiquidGlass.Spacing.xs) {
@@ -24,10 +26,16 @@ struct MessageBubble: View {
                 .background(bubbleBackground)
                 .clipShape(
                     RoundedRectangle(
-                        cornerRadius: LiquidGlass.CornerRadius.bubble,
+                        cornerRadius: isGrouped ? LiquidGlass.CornerRadius.md : LiquidGlass.CornerRadius.bubble,
                         style: .continuous
                     )
                 )
+                .overlay(alignment: message.isFromUser ? .bottomTrailing : .bottomLeading) {
+                    if isLastInGroup {
+                        BubbleTail(isFromUser: message.isFromUser)
+                            .offset(x: message.isFromUser ? 2 : -2, y: 2)
+                    }
+                }
 
             if !message.isFromUser {
                 Spacer(minLength: LiquidGlass.Spacing.bubbleMinMargin)
@@ -87,7 +95,7 @@ struct AssistantMessageBubble: View {
                             )
                         )
                 } else {
-                    MessageBubble(message: message)
+                    MessageBubble(message: message, isGrouped: false, isLastInGroup: true)
                 }
             }
 
@@ -140,15 +148,27 @@ struct StreamingTypingBubble: View {
     }
 }
 
+// MARK: - Bubble Tail
+
+struct BubbleTail: View {
+    let isFromUser: Bool
+
+    var body: some View {
+        Circle()
+            .fill(isFromUser ? LiquidGlass.Colors.userBubble : LiquidGlass.Colors.assistantBubble)
+            .frame(width: 8, height: 8)
+    }
+}
+
 // MARK: - Previews
 
 #Preview("User Message") {
-    MessageBubble(message: .previewUser)
+    MessageBubble(message: .previewUser, isGrouped: false, isLastInGroup: true)
         .padding()
 }
 
 #Preview("Assistant Message") {
-    MessageBubble(message: .previewAssistant)
+    MessageBubble(message: .previewAssistant, isGrouped: false, isLastInGroup: true)
         .padding()
 }
 

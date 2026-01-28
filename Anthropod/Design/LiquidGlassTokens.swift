@@ -21,6 +21,9 @@ enum LiquidGlass {
 
         /// Breathing room between messages
         static let messagePadding: CGFloat = 16
+        static let messageGroupSpacing: CGFloat = 6
+        static let messageStackSpacing: CGFloat = 4
+        static let messageGroupGap: CGFloat = 12
 
         /// Minimum space on opposite side of message bubble
         static let bubbleMinMargin: CGFloat = 60
