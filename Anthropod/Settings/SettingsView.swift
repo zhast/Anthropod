@@ -6,9 +6,9 @@
 //
 
 import SwiftUI
+import Foundation
 
 struct SettingsView: View {
-    @State private var selection: SettingsPane = .general
     @State private var model = SettingsViewModel()
 
     @AppStorage(AnthropodDefaults.compactLayout) private var compactLayout = false
@@ -16,19 +16,22 @@ struct SettingsView: View {
     @AppStorage(AnthropodDefaults.preferredModelId) private var preferredModelId = ""
 
     var body: some View {
-        NavigationSplitView {
-            List(SettingsPane.allCases, selection: $selection) { pane in
-                Label(pane.title, systemImage: pane.icon)
-                    .tag(pane)
+        TabView {
+            Tab("General", systemImage: "gearshape") {
+                generalPane
             }
-            .listStyle(.sidebar)
-        } detail: {
-            detailView
-                .padding(.horizontal, 24)
-                .padding(.vertical, 18)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            Tab("Chat", systemImage: "bubble.left.and.bubble.right") {
+                chatPane
+            }
+            Tab("Models", systemImage: "cpu") {
+                modelsPane
+            }
+            Tab("Usage", systemImage: "chart.bar") {
+                usagePane
+            }
         }
-        .frame(minWidth: 760, minHeight: 520)
+        .tabViewStyle(.sidebarAdaptable)
+        .frame(minWidth: 700, minHeight: 480)
         .task {
             await model.refreshAll()
         }
@@ -37,20 +40,6 @@ struct SettingsView: View {
                 let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 await model.applyModel(trimmed.isEmpty ? nil : trimmed)
             }
-        }
-    }
-
-    @ViewBuilder
-    private var detailView: some View {
-        switch selection {
-        case .general:
-            generalPane
-        case .chat:
-            chatPane
-        case .models:
-            modelsPane
-        case .usage:
-            usagePane
         }
     }
 
@@ -66,6 +55,7 @@ struct SettingsView: View {
                 }
                 .keyboardShortcut("r", modifiers: [.command])
             }
+
             Section("About") {
                 LabeledContent("Version", value: appVersion)
             }
@@ -167,33 +157,6 @@ struct SettingsView: View {
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
-    }
-}
-
-private enum SettingsPane: String, CaseIterable, Identifiable {
-    case general
-    case chat
-    case models
-    case usage
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .general: "General"
-        case .chat: "Chat"
-        case .models: "Models"
-        case .usage: "Usage"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .general: "gearshape"
-        case .chat: "bubble.left.and.bubble.right"
-        case .models: "cpu"
-        case .usage: "chart.bar"
-        }
     }
 }
 

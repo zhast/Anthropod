@@ -33,9 +33,26 @@ struct AnthropodApp: App {
             width: LiquidGlass.Window.defaultWidth,
             height: LiquidGlass.Window.defaultHeight
         )
+        .commands {
+            SettingsCommands()
+        }
 
-        Settings {
+        Window("Anthropod Settings", id: "settings") {
             SettingsView()
+        }
+        .defaultSize(width: 700, height: 480)
+    }
+}
+
+private struct SettingsCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") {
+                openWindow(id: "settings")
+            }
+            .keyboardShortcut(",", modifiers: .command)
         }
     }
 }
