@@ -296,6 +296,15 @@ Future phases: May add for gateway connection
 
 ---
 
+## Current Implementation Notes (Jan 28, 2026)
+
+- Gateway auth now mirrors the original app: resolve token/password from `~/.clawdbot/moltbot.json`, launchd env, or `CLAWDBOT_*` overrides.
+- Sandbox is disabled for now to allow access to `~/.clawdbot` and launchd config; re-enable once we move token storage into App Sandbox.
+- Chat resumes on launch by calling `chat.history`, and session keys update from `event.chat` payloads to keep continuity.
+- Debug overlay includes gateway trace output (enable with `ANTHROPOD_GATEWAY_TRACE=1`).
+
+---
+
 ## Sources
 
 - https://developer.apple.com/documentation/SwiftUI/Applying-Liquid-Glass-to-custom-views
