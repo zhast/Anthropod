@@ -158,6 +158,40 @@ final class GatewayService {
         return payload.models
     }
 
+    struct SessionModelSnapshot: Sendable {
+        let defaultProvider: String?
+        let defaultModel: String?
+        let defaultContextTokens: Int?
+        let sessionProvider: String?
+        let sessionModel: String?
+        let sessionContextTokens: Int?
+    }
+
+    func sessionModelSnapshot(sessionKey: String? = nil) async throws -> SessionModelSnapshot {
+        guard let client else { throw GatewayError.notConnected }
+        let key = sessionKey ?? mainSessionKey
+        let params: [String: Any] = [
+            "search": key,
+            "limit": 20,
+            "includeGlobal": true,
+            "includeUnknown": true
+        ]
+        let payload: SessionsListResult = try await client.requestDecoded(
+            method: "sessions.list",
+            params: params,
+            timeoutMs: 7000
+        )
+        let match = payload.sessions.first { $0.key == key }
+        return SessionModelSnapshot(
+            defaultProvider: payload.defaults.modelProvider,
+            defaultModel: payload.defaults.model,
+            defaultContextTokens: payload.defaults.contextTokens,
+            sessionProvider: match?.modelProvider,
+            sessionModel: match?.model,
+            sessionContextTokens: match?.contextTokens
+        )
+    }
+
     func usageCostSummary() async throws -> GatewayCostUsageSummary {
         guard let client else { throw GatewayError.notConnected }
         return try await client.requestDecoded(

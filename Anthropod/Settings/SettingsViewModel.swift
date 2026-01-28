@@ -15,6 +15,12 @@ final class SettingsViewModel {
     var models: [ModelChoice] = []
     var isLoadingModels = false
     var modelError: String?
+    var defaultModelProvider: String?
+    var defaultModelId: String?
+    var defaultModelContextTokens: Int?
+    var sessionModelProvider: String?
+    var sessionModelId: String?
+    var sessionModelContextTokens: Int?
 
     var usageSummary: GatewayCostUsageSummary?
     var isLoadingUsage = false
@@ -25,6 +31,7 @@ final class SettingsViewModel {
     func refreshAll() async {
         await ensureConnected()
         await refreshModels()
+        await refreshModelStatus()
         await refreshUsage()
     }
 
@@ -48,6 +55,26 @@ final class SettingsViewModel {
         }
     }
 
+    func refreshModelStatus() async {
+        do {
+            await ensureConnected()
+            let status = try await gateway.sessionModelSnapshot(sessionKey: gateway.mainSessionKey)
+            defaultModelProvider = status.defaultProvider
+            defaultModelId = status.defaultModel
+            defaultModelContextTokens = status.defaultContextTokens
+            sessionModelProvider = status.sessionProvider
+            sessionModelId = status.sessionModel
+            sessionModelContextTokens = status.sessionContextTokens
+        } catch {
+            defaultModelProvider = nil
+            defaultModelId = nil
+            defaultModelContextTokens = nil
+            sessionModelProvider = nil
+            sessionModelId = nil
+            sessionModelContextTokens = nil
+        }
+    }
+
     func refreshUsage() async {
         isLoadingUsage = true
         usageError = nil
@@ -67,6 +94,7 @@ final class SettingsViewModel {
             await ensureConnected()
             try await gateway.patchSessionModel(modelId: modelId)
             compactStatus = nil
+            await refreshModelStatus()
         } catch {
             modelError = error.localizedDescription
         }

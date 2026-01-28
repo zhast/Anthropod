@@ -96,10 +96,22 @@ struct SettingsView: View {
                     ProgressView("Loading models…")
                 }
 
-                Picker("Default model", selection: $preferredModelId) {
-                    Text("Gateway default").tag("")
-                    ForEach(model.models) { choice in
-                        Text(choice.name.isEmpty ? choice.id : choice.name)
+                LabeledContent("Default model", value: defaultModelRef)
+                if let name = defaultModelName {
+                    LabeledContent("Default name", value: name)
+                }
+                LabeledContent("Last used", value: sessionModelRef)
+                if let name = sessionModelName {
+                    LabeledContent("Last used name", value: name)
+                }
+                Text("Availability depends on gateway auth and provider status.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("Preferred model", selection: $preferredModelId) {
+                    Text("Gateway default (server-selected)").tag("")
+                    ForEach(pickerModels) { choice in
+                        Text(modelOptionLabel(choice))
                             .tag(choice.id)
                     }
                 }
@@ -113,6 +125,10 @@ struct SettingsView: View {
                     if let reasoning = choice.reasoning {
                         LabeledContent("Reasoning", value: reasoning ? "Supported" : "No")
                     }
+                } else {
+                    Text("Gateway default will use the server’s configured model.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let error = model.modelError {
@@ -153,6 +169,53 @@ struct SettingsView: View {
     private var selectedModelChoice: ModelChoice? {
         guard !preferredModelId.isEmpty else { return nil }
         return model.models.first { $0.id == preferredModelId }
+    }
+
+    private var pickerModels: [ModelChoice] {
+        var seen = Set<String>()
+        return model.models.filter { seen.insert($0.id).inserted }
+    }
+
+    private var defaultModelRef: String {
+        modelRef(provider: model.defaultModelProvider, id: model.defaultModelId) ?? "Unavailable"
+    }
+
+    private var sessionModelRef: String {
+        modelRef(provider: model.sessionModelProvider, id: model.sessionModelId) ?? "Not yet used"
+    }
+
+    private var defaultModelName: String? {
+        modelName(provider: model.defaultModelProvider, id: model.defaultModelId)
+    }
+
+    private var sessionModelName: String? {
+        modelName(provider: model.sessionModelProvider, id: model.sessionModelId)
+    }
+
+    private func modelRef(provider: String?, id: String?) -> String? {
+        guard let id, !id.isEmpty else { return nil }
+        if let provider, !provider.isEmpty {
+            return "\(provider)/\(id)"
+        }
+        return id
+    }
+
+    private func modelName(provider: String?, id: String?) -> String? {
+        guard let id, !id.isEmpty else { return nil }
+        let match = model.models.first {
+            $0.id == id && (provider == nil || $0.provider == provider)
+        }
+        guard let match else { return nil }
+        let display = modelDisplayName(match)
+        return display == id ? nil : display
+    }
+
+    private func modelDisplayName(_ choice: ModelChoice) -> String {
+        choice.name.isEmpty ? choice.id : choice.name
+    }
+
+    private func modelOptionLabel(_ choice: ModelChoice) -> String {
+        "\(choice.provider) · \(modelDisplayName(choice))"
     }
 
     private var appVersion: String {

@@ -273,6 +273,29 @@ struct ModelsListResult: Decodable, Sendable {
     nonisolated let models: [ModelChoice]
 }
 
+// MARK: - Sessions
+
+@preconcurrency
+nonisolated struct GatewaySessionsDefaults: Decodable, Sendable {
+    nonisolated let modelProvider: String?
+    nonisolated let model: String?
+    nonisolated let contextTokens: Int?
+}
+
+@preconcurrency
+nonisolated struct GatewaySessionRow: Decodable, Sendable {
+    nonisolated let key: String
+    nonisolated let modelProvider: String?
+    nonisolated let model: String?
+    nonisolated let contextTokens: Int?
+}
+
+@preconcurrency
+struct SessionsListResult: Decodable, Sendable {
+    nonisolated let defaults: GatewaySessionsDefaults
+    nonisolated let sessions: [GatewaySessionRow]
+}
+
 // MARK: - Gateway Push Events
 
 enum GatewayPush: Sendable {
