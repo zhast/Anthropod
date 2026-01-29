@@ -19,14 +19,17 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
-            Tab("Connections", systemImage: "key") {
-                connectionsPane
+            Tab("Models", systemImage: "cpu") {
+                modelsPane
             }
             Tab("Chat", systemImage: "bubble.left.and.bubble.right") {
                 chatPane
             }
             Tab("Usage", systemImage: "chart.bar") {
                 usagePane
+            }
+            Tab("Docs", systemImage: "doc.richtext") {
+                docsPane
             }
             Tab("Advanced", systemImage: "gearshape.2") {
                 advancedPane
@@ -45,7 +48,7 @@ struct SettingsView: View {
         }
     }
 
-    private var connectionsPane: some View {
+    private var modelsPane: some View {
         Form {
             Section("API Connections") {
                 AuthProfilesEditor(
@@ -87,15 +90,87 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Gateway") {
-                LabeledContent("Status", value: model.connectionStatusText)
-                if let detail = model.connectionStatusDetail {
-                    LabeledContent("Session", value: detail)
+            Section("Model Order") {
+                if model.configDraft != nil {
+                    HStack(spacing: 12) {
+                        Button("Apply") { Task { await model.saveConfigFile() } }
+                            .disabled(!model.configDraftHasChanges)
+                        Button("Revert") { model.revertConfigEdits() }
+                            .disabled(!model.configDraftHasChanges)
+                        Spacer()
+                    }
+
+                    if modelOrder.isEmpty {
+                        Text("Choose a primary model to enable fallbacks.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(spacing: 8) {
+                            ForEach(Array(modelOrder.enumerated()), id: \.element) { index, modelId in
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(modelDisplayName(for: modelId))
+                                            .font(.subheadline)
+                                        Text(modelProviderName(for: modelId))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if index == 0 {
+                                        Text("Primary")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Text("Backup \(index)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    HStack(spacing: 6) {
+                                        Button {
+                                            moveModelUp(modelId)
+                                        } label: {
+                                            Image(systemName: "chevron.up")
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .disabled(index == 0)
+
+                                        Button {
+                                            moveModelDown(modelId)
+                                        } label: {
+                                            Image(systemName: "chevron.down")
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .disabled(index == modelOrder.count - 1)
+                                    }
+                                    if index > 0 {
+                                        Button(role: .destructive) {
+                                            removeFallback(modelId)
+                                        } label: {
+                                            Image(systemName: "minus.circle")
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                }
+                                .padding(8)
+                                .background(.secondary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                        }
+                    }
+
+                    Menu("Add backup") {
+                        ForEach(availableFallbacks, id: \.self) { modelId in
+                            Button(modelMenuLabel(for: modelId)) {
+                                addFallback(modelId)
+                            }
+                        }
+                    }
+                    .disabled(availableFallbacks.isEmpty)
+                } else {
+                    Text("Config not loaded.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Button("Reconnect") {
-                    Task { await model.refreshAll() }
-                }
-                .keyboardShortcut("r", modifiers: [.command])
             }
         }
         .formStyle(.grouped)
@@ -182,22 +257,19 @@ struct SettingsView: View {
                 }
             }
             .formStyle(.grouped)
-
-            workspaceDocsPane
         }
         .task {
             await model.refreshConfigFiles()
         }
     }
-
-    private var workspaceDocsPane: some View {
+    private var docsPane: some View {
         VStack(spacing: 12) {
             DocSegmentedPicker(selection: $workspaceDocSelection, docs: workspaceDocs)
                 .padding(.horizontal)
                 .padding(.top, 8)
 
             Form {
-                Section("Workspace Docs") {
+                Section {
                     ConfigFileEditor(
                         title: selectedWorkspaceDoc?.title ?? "Workspace Doc",
                         subtitle: model.workspaceDocPath,
@@ -234,6 +306,81 @@ struct SettingsView: View {
 
     private func modelOptionLabel(_ choice: ModelChoice) -> String {
         "\(choice.provider) · \(modelDisplayName(choice))"
+    }
+
+    private var modelOrder: [String] {
+        guard let draft = model.configDraft else { return [] }
+        let primary = draft.modelPrimary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbacks = draft.modelFallbacks.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !primary.isEmpty else { return fallbacks }
+        return [primary] + fallbacks.filter { $0 != primary }
+    }
+
+    private var availableFallbacks: [String] {
+        guard let draft = model.configDraft else { return [] }
+        let selected = Set(modelOrder)
+        let choices = draft.modelChoices.filter { !selected.contains($0) }
+        if !choices.isEmpty { return choices }
+        return model.models.map(\.id).filter { !selected.contains($0) }
+    }
+
+    private func moveModelUp(_ modelId: String) {
+        var order = modelOrder
+        guard let index = order.firstIndex(of: modelId), index > 0 else { return }
+        order.swapAt(index, index - 1)
+        applyModelOrder(order)
+    }
+
+    private func moveModelDown(_ modelId: String) {
+        var order = modelOrder
+        guard let index = order.firstIndex(of: modelId), index < order.count - 1 else { return }
+        order.swapAt(index, index + 1)
+        applyModelOrder(order)
+    }
+
+    private func applyModelOrder(_ order: [String]) {
+        guard !order.isEmpty else { return }
+        model.updateConfigDraft { draft in
+            draft.modelPrimary = order.first ?? ""
+            draft.modelFallbacks = Array(order.dropFirst())
+        }
+    }
+
+    private func addFallback(_ modelId: String) {
+        var order = modelOrder
+        if order.isEmpty {
+            order = [modelId]
+        } else if !order.contains(modelId) {
+            order.append(modelId)
+        }
+        applyModelOrder(order)
+    }
+
+    private func removeFallback(_ modelId: String) {
+        var order = modelOrder
+        order.removeAll { $0 == modelId }
+        applyModelOrder(order)
+    }
+
+    private func modelDisplayName(for modelId: String) -> String {
+        if let match = model.models.first(where: { $0.id == modelId }) {
+            return modelDisplayName(match)
+        }
+        return modelId
+    }
+
+    private func modelProviderName(for modelId: String) -> String {
+        if let match = model.models.first(where: { $0.id == modelId }) {
+            return match.provider
+        }
+        return ""
+    }
+
+    private func modelMenuLabel(for modelId: String) -> String {
+        let name = modelDisplayName(for: modelId)
+        let provider = modelProviderName(for: modelId)
+        if provider.isEmpty { return name }
+        return "\(provider) · \(name)"
     }
 
     private var appVersion: String {
