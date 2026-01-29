@@ -34,6 +34,8 @@ final class GatewayService {
     private var agentRunHandlers: [(AgentRunEvent) -> Void] = []
     private var chatHandlers: [(ChatRunEvent) -> Void] = []
     private var agentHandlers: [(AgentStreamEvent) -> Void] = []
+    private var reconnectTask: Task<Void, Never>?
+    private var suppressAutoReconnect = false
 
     private init() {}
 
@@ -41,6 +43,8 @@ final class GatewayService {
 
     func connect() async {
         guard !isConnecting else { return }
+        reconnectTask?.cancel()
+        reconnectTask = nil
 
         isConnecting = true
         connectionError = nil
@@ -60,6 +64,9 @@ final class GatewayService {
         let newClient = GatewayClient(url: endpoint.url, token: endpoint.token, password: endpoint.password)
         await newClient.setPushHandler { [weak self] push in
             await self?.handlePush(push)
+        }
+        await newClient.setDisconnectHandler { [weak self] error in
+            await self?.handleClientDisconnect(error)
         }
 
         do {
@@ -82,9 +89,54 @@ final class GatewayService {
     }
 
     func disconnect() async {
+        suppressAutoReconnect = true
         await client?.disconnect()
         client = nil
         isConnected = false
+        connectionError = nil
+        suppressAutoReconnect = false
+    }
+
+    private func handleClientDisconnect(_ error: Error?) async {
+        isConnected = false
+        if let error {
+            connectionError = error.localizedDescription
+        } else if connectionError == nil {
+            connectionError = "Disconnected"
+        }
+
+        guard !suppressAutoReconnect else { return }
+        scheduleReconnect()
+    }
+
+    private func scheduleReconnect() {
+        guard reconnectTask == nil else { return }
+        reconnectTask = Task { [weak self] in
+            guard let self else { return }
+            await self.runReconnectLoop()
+        }
+    }
+
+    private func runReconnectLoop() async {
+        let delays: [UInt64] = [
+            500_000_000,
+            1_000_000_000,
+            2_000_000_000,
+            4_000_000_000,
+            8_000_000_000
+        ]
+        var attempt = 0
+        while !Task.isCancelled {
+            if isConnected || isConnecting {
+                break
+            }
+            let delay = delays[min(attempt, delays.count - 1)]
+            try? await Task.sleep(nanoseconds: delay)
+            await connect()
+            if isConnected { break }
+            attempt += 1
+        }
+        reconnectTask = nil
     }
 
     // MARK: - Chat API

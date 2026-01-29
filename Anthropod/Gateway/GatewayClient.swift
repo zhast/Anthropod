@@ -28,6 +28,7 @@ actor GatewayClient {
     private let defaultRequestTimeoutMs: Double = 15000
 
     private var pushHandler: (@Sendable (GatewayPush) async -> Void)?
+    private var disconnectHandler: (@Sendable (Error?) async -> Void)?
     private var lastSnapshot: HelloOk?
     private var tickIntervalMs: Double = 30000
     private let traceEnabled: Bool
@@ -54,6 +55,10 @@ actor GatewayClient {
 
     func setPushHandler(_ handler: @escaping @Sendable (GatewayPush) async -> Void) {
         self.pushHandler = handler
+    }
+
+    func setDisconnectHandler(_ handler: @escaping @Sendable (Error?) async -> Void) {
+        self.disconnectHandler = handler
     }
 
     func traceSnapshot() -> String {
@@ -410,6 +415,10 @@ actor GatewayClient {
         pending.removeAll()
         for (_, waiter) in waiters {
             waiter.resume(throwing: GatewayError.disconnected)
+        }
+
+        if let disconnectHandler {
+            await disconnectHandler(error)
         }
     }
 
