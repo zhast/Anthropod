@@ -33,7 +33,7 @@ struct MessageBubble: View {
                 )
                 .overlay(alignment: message.isFromUser ? .bottomTrailing : .bottomLeading) {
                     if isLastInGroup {
-                        BubbleTail(isFromUser: message.isFromUser)
+                        BubbleTail(fill: bubbleBackground)
                             .offset(x: message.isFromUser ? 2 : -2, y: 2)
                     }
                 }
@@ -45,7 +45,10 @@ struct MessageBubble: View {
     }
 
     private var bubbleBackground: Color {
-        message.isFromUser
+        if message.isSystemError {
+            return LiquidGlass.Colors.errorBubble
+        }
+        return message.isFromUser
             ? LiquidGlass.Colors.userBubble
             : LiquidGlass.Colors.assistantBubble
     }
@@ -156,11 +159,11 @@ struct StreamingTypingBubble: View {
 // MARK: - Bubble Tail
 
 struct BubbleTail: View {
-    let isFromUser: Bool
+    let fill: Color
 
     var body: some View {
         Circle()
-            .fill(isFromUser ? LiquidGlass.Colors.userBubble : LiquidGlass.Colors.assistantBubble)
+            .fill(fill)
             .frame(width: 8, height: 8)
     }
 }

@@ -63,7 +63,7 @@ final class ChatViewModel {
         isConnecting = false
 
         if let error = gateway.connectionError {
-            errorMessage = error
+            recordError(error, showAlert: true)
             return
         }
 
@@ -130,7 +130,7 @@ final class ChatViewModel {
             isLoading = false
             currentRunId = nil
         } catch {
-            errorMessage = error.localizedDescription
+            recordError(error.localizedDescription)
         }
     }
 
@@ -173,8 +173,12 @@ final class ChatViewModel {
                     message.sessionId == sessionId
                 }
             )
+            var preservedErrors: [(content: String, timestamp: Date)] = []
             if let existing = try? modelContext.fetch(descriptor) {
                 for message in existing {
+                    if message.isSystemError {
+                        preservedErrors.append((message.content, message.timestamp))
+                    }
                     modelContext.delete(message)
                 }
             }
@@ -198,10 +202,21 @@ final class ChatViewModel {
                 modelContext.insert(message)
                 index += 1
             }
+            for preserved in preservedErrors {
+                let message = Message(
+                    content: preserved.content,
+                    isFromUser: false,
+                    timestamp: preserved.timestamp,
+                    sortIndex: index,
+                    sessionId: sessionId
+                )
+                modelContext.insert(message)
+                index += 1
+            }
             nextSortIndex = index
             try? modelContext.save()
         } catch {
-            errorMessage = error.localizedDescription
+            recordError(error.localizedDescription)
         }
     }
 
@@ -223,7 +238,7 @@ final class ChatViewModel {
         }
 
         guard gateway.isConnected else {
-            errorMessage = "Unable to connect to gateway. Please check that Moltbot is running."
+            recordError("Unable to connect to gateway. Please check that Moltbot is running.", showAlert: true)
             isLoading = false
             return
         }
@@ -244,7 +259,7 @@ final class ChatViewModel {
             }
         } catch {
             isLoading = false
-            errorMessage = error.localizedDescription
+            recordError(error.localizedDescription)
         }
     }
 
@@ -256,7 +271,7 @@ final class ChatViewModel {
             isLoading = false
             currentRunId = nil
             if let error = event.error, !error.isEmpty {
-                errorMessage = error
+                recordError(error)
             }
         }
     }
@@ -271,7 +286,7 @@ final class ChatViewModel {
 
         if event.isComplete {
             if let error = event.errorMessage, !error.isEmpty {
-                errorMessage = error
+                recordError(error)
             }
             streamingAssistantText = nil
             isLoading = false
@@ -317,7 +332,7 @@ final class ChatViewModel {
             lastAppliedModelId = trimmed
             lastAppliedSessionKey = sessionKey
         } catch {
-            errorMessage = error.localizedDescription
+            recordError(error.localizedDescription)
         }
     }
 
@@ -361,6 +376,30 @@ final class ChatViewModel {
         guard !trimmed.isEmpty else { return nil }
         let millis = Int(entry.timestamp.timeIntervalSince1970 * 1000)
         return "\(entry.role)|\(millis)|\(trimmed)"
+    }
+
+    private func recordError(_ message: String, showAlert: Bool = false) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        appendSystemErrorMessage(trimmed)
+        if showAlert {
+            errorMessage = trimmed
+        }
+    }
+
+    private func appendSystemErrorMessage(_ message: String) {
+        guard let modelContext else { return }
+        let content = Message.systemErrorPrefix + message
+        let newMessage = Message(
+            content: content,
+            isFromUser: false,
+            timestamp: Date(),
+            sortIndex: nextSortIndex,
+            sessionId: currentSessionId
+        )
+        nextSortIndex += 1
+        modelContext.insert(newMessage)
+        try? modelContext.save()
     }
 }
 

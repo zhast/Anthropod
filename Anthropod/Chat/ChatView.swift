@@ -89,6 +89,16 @@ struct ChatView: View {
 
     private var messageList: some View {
         ScrollViewReader { proxy in
+            let scrollToBottom: (Bool) -> Void = { animated in
+                if animated {
+                    withAnimation(LiquidGlass.Animation.spring) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                } else {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
+
             ScrollView {
                 LazyVStack(spacing: layout.groupGap) {
                     // Empty state
@@ -130,9 +140,18 @@ struct ChatView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: sessionMessages.count) { _, _ in
-                withAnimation(LiquidGlass.Animation.spring) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
+                scrollToBottom(true)
+            }
+            .onChange(of: viewModel.isLoading) { _, isLoading in
+                if isLoading {
+                    scrollToBottom(true)
                 }
+            }
+            .onChange(of: viewModel.streamingAssistantText) { _, _ in
+                scrollToBottom(false)
+            }
+            .onChange(of: viewModel.currentSessionId) { _, _ in
+                scrollToBottom(false)
             }
         }
     }
@@ -171,7 +190,10 @@ struct ChatView: View {
                 currentDay = day
             }
 
-            if var group = currentGroup, group.isFromUser == message.isFromUser {
+            if var group = currentGroup,
+               group.isFromUser == message.isFromUser,
+               group.isSystemError == message.isSystemError
+            {
                 group.messages.append(message)
                 group.lastTimestamp = message.timestamp
                 currentGroup = group
@@ -182,6 +204,7 @@ struct ChatView: View {
                 currentGroup = MessageGroup(
                     id: message.id,
                     isFromUser: message.isFromUser,
+                    isSystemError: message.isSystemError,
                     messages: [message],
                     day: day,
                     lastTimestamp: message.timestamp
@@ -225,6 +248,7 @@ struct ChatView: View {
     private struct MessageGroup: Equatable {
         let id: UUID
         let isFromUser: Bool
+        let isSystemError: Bool
         var messages: [Message]
         let day: Date
         var lastTimestamp: Date

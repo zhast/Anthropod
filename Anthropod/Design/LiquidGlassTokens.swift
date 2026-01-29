@@ -91,6 +91,9 @@ enum LiquidGlass {
         /// Assistant message bubble background
         static let assistantBubble = Color.secondary.opacity(0.08)
 
+        /// Error/system message bubble background
+        static let errorBubble = Color.red.opacity(0.12)
+
         /// Subtle text color for secondary content
         static let secondaryText = Color.secondary
 

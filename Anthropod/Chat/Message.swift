@@ -51,6 +51,12 @@ extension Message {
     static func assistant(_ content: String, sessionId: UUID? = nil, sortIndex: Int? = nil, isStreaming: Bool = false) -> Message {
         Message(content: content, isFromUser: false, sortIndex: sortIndex, sessionId: sessionId, isStreaming: isStreaming)
     }
+
+    static let systemErrorPrefix = "Error: "
+
+    var isSystemError: Bool {
+        !isFromUser && content.hasPrefix(Self.systemErrorPrefix)
+    }
 }
 
 // MARK: - Preview Helpers
