@@ -99,25 +99,32 @@ struct SettingsView: View {
 
     private var modelsPane: some View {
         Form {
-            Section("Model Selection") {
+            Section("API Connections") {
+                AuthProfilesEditor(
+                    draft: model.authProfilesDraft,
+                    error: model.authProfilesDraftError ?? model.authProfilesError,
+                    hasChanges: model.authProfilesText != model.authProfilesOriginalText,
+                    onUpdate: { updated in
+                        model.updateAuthProfilesDraft { $0 = updated }
+                    },
+                    onClearUsage: { profileId in
+                        model.clearAuthProfileUsage(profileId: profileId)
+                    },
+                    onReload: { Task { await model.loadAuthProfilesFile() } },
+                    onRevert: { model.revertAuthProfilesEdits() },
+                    onSave: { Task { await model.saveAuthProfilesFile() } },
+                    onVerify: { Task { await model.verifyAuthProfiles() } },
+                    status: model.authCheckStatus
+                )
+            }
+
+            Section("Preferred Model") {
                 if model.isLoadingModels {
                     ProgressView("Loading models…")
                 }
 
-                LabeledContent("Default model", value: defaultModelRef)
-                if let name = defaultModelName {
-                    LabeledContent("Default name", value: name)
-                }
-                LabeledContent("Last used", value: sessionModelRef)
-                if let name = sessionModelName {
-                    LabeledContent("Last used name", value: name)
-                }
-                Text("Availability depends on gateway auth and provider status.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Picker("Preferred model", selection: $preferredModelId) {
-                    Text("Gateway default (server-selected)").tag("")
+                Picker("Model", selection: $preferredModelId) {
+                    Text("Gateway default").tag("")
                     ForEach(pickerModels) { choice in
                         Text(modelOptionLabel(choice))
                             .tag(choice.id)
@@ -125,26 +132,17 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.menu)
 
-                if let choice = selectedModelChoice {
-                    LabeledContent("Provider", value: choice.provider)
-                    if let context = choice.contextWindow {
-                        LabeledContent("Context", value: "\(context) tokens")
-                    }
-                    if let reasoning = choice.reasoning {
-                        LabeledContent("Reasoning", value: reasoning ? "Supported" : "No")
-                    }
-                } else {
-                    Text("Gateway default will use the server’s configured model.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
                 if let error = model.modelError {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
 
+            DisclosureGroup("Advanced") {
+                Text("Availability depends on gateway auth and provider status.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Button("Reload models") {
                     Task { await model.refreshModels() }
                 }
@@ -176,52 +174,36 @@ struct SettingsView: View {
 
     private var configPane: some View {
         Form {
-            Section("Config") {
-                ConfigUIEditor(
-                    draft: model.configDraft,
-                    error: model.configDraftError,
-                    hasChanges: model.configDraftHasChanges,
-                    onUpdate: { updated in
-                        model.updateConfigDraft { $0 = updated }
-                    },
-                    onSave: { Task { await model.saveConfigFile() } },
-                    onRevert: { model.revertConfigEdits() }
-                )
-                DisclosureGroup("Raw Config") {
-                    ConfigFileEditor(
-                        title: "Config",
-                        subtitle: model.configPath,
-                        text: $model.configText,
-                        isLoading: model.isLoadingConfig,
-                        error: model.configError,
-                        hasChanges: model.configText != model.configOriginalText,
-                        onFormat: {
-                            model.formatConfigJson()
+            Section("Advanced Config") {
+                DisclosureGroup("Config file") {
+                    ConfigUIEditor(
+                        draft: model.configDraft,
+                        error: model.configDraftError,
+                        hasChanges: model.configDraftHasChanges,
+                        onUpdate: { updated in
+                            model.updateConfigDraft { $0 = updated }
                         },
-                        onReload: { Task { await model.loadConfigFile() } },
-                        onRevert: { model.revertConfigEdits() },
-                        onSave: { Task { await model.saveConfigFile() } }
+                        onSave: { Task { await model.saveConfigFile() } },
+                        onRevert: { model.revertConfigEdits() }
                     )
+                    DisclosureGroup("Raw JSON") {
+                        ConfigFileEditor(
+                            title: "Config",
+                            subtitle: model.configPath,
+                            text: $model.configText,
+                            isLoading: model.isLoadingConfig,
+                            error: model.configError,
+                            hasChanges: model.configText != model.configOriginalText,
+                            onFormat: {
+                                model.formatConfigJson()
+                            },
+                            onReload: { Task { await model.loadConfigFile() } },
+                            onRevert: { model.revertConfigEdits() },
+                            onSave: { Task { await model.saveConfigFile() } }
+                        )
+                    }
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
-            }
-            Section("Credentials") {
-                AuthProfilesEditor(
-                    draft: model.authProfilesDraft,
-                    error: model.authProfilesDraftError ?? model.authProfilesError,
-                    hasChanges: model.authProfilesText != model.authProfilesOriginalText,
-                    onUpdate: { updated in
-                        model.updateAuthProfilesDraft { $0 = updated }
-                    },
-                    onClearUsage: { profileId in
-                        model.clearAuthProfileUsage(profileId: profileId)
-                    },
-                    onReload: { Task { await model.loadAuthProfilesFile() } },
-                    onRevert: { model.revertAuthProfilesEdits() },
-                    onSave: { Task { await model.saveAuthProfilesFile() } },
-                    onVerify: { Task { await model.verifyAuthProfiles() } },
-                    status: model.authCheckStatus
-                )
             }
         }
         .formStyle(.grouped)
@@ -630,10 +612,12 @@ private struct AuthProfilesEditor: View {
             HStack(spacing: 12) {
                 Button("Save") { onSave() }
                     .disabled(!hasChanges)
-                Button("Revert") { onRevert() }
-                    .disabled(!hasChanges)
-                Button("Reload") { onReload() }
-                Button("Verify keys") { onVerify() }
+                Button("Test connection") { onVerify() }
+                Menu("More") {
+                    Button("Reload") { onReload() }
+                    Button("Revert") { onRevert() }
+                        .disabled(!hasChanges)
+                }
                 if let status, !status.isEmpty {
                     Text(status)
                         .font(.caption)

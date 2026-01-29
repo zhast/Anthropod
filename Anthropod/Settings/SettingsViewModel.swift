@@ -87,13 +87,18 @@ final class SettingsViewModel {
     }
 
     func verifyAuthProfiles() async {
-        await refreshModels()
-        if let error = modelError, !error.isEmpty {
-            authCheckStatus = "Auth check failed: \(error)"
-        } else if models.isEmpty {
-            authCheckStatus = "Auth check ok (no models returned)"
-        } else {
-            authCheckStatus = "Auth check ok (\(models.count) models)"
+        authCheckStatus = "Testing connection…"
+        do {
+            await ensureConnected()
+            let runId = try await gateway.chatSend(
+                message: "ping",
+                sessionKey: "auth-check",
+                thinking: "off"
+            )
+            _ = try? await gateway.chatAbort(sessionKey: "auth-check", runId: runId)
+            authCheckStatus = "Connection ok"
+        } catch {
+            authCheckStatus = "Connection failed: \(error.localizedDescription)"
         }
     }
 
