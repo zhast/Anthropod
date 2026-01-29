@@ -19,23 +19,17 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
-            Tab("General", systemImage: "gearshape") {
-                generalPane
+            Tab("Connections", systemImage: "key") {
+                connectionsPane
             }
             Tab("Chat", systemImage: "bubble.left.and.bubble.right") {
                 chatPane
             }
-            Tab("Models", systemImage: "cpu") {
-                modelsPane
-            }
             Tab("Usage", systemImage: "chart.bar") {
                 usagePane
             }
-            Tab("Files", systemImage: "doc.text") {
-                configPane
-            }
-            Tab("Docs", systemImage: "doc.richtext") {
-                docsPane
+            Tab("Advanced", systemImage: "gearshape.2") {
+                advancedPane
             }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -51,53 +45,7 @@ struct SettingsView: View {
         }
     }
 
-    private var generalPane: some View {
-        Form {
-            Section("Gateway") {
-                LabeledContent("Status", value: model.connectionStatusText)
-                if let detail = model.connectionStatusDetail {
-                    LabeledContent("Session", value: detail)
-                }
-                Button("Reconnect") {
-                    Task { await model.refreshAll() }
-                }
-                .keyboardShortcut("r", modifiers: [.command])
-            }
-
-            Section("About") {
-                LabeledContent("Version", value: appVersion)
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    private var chatPane: some View {
-        Form {
-            Section("Chat History") {
-                Stepper(value: $compactMaxLines, in: 100...2000, step: 50) {
-                    LabeledContent("Compact target", value: "\(compactMaxLines) lines")
-                }
-                Button("Compact current session") {
-                    Task { await model.compactSession(maxLines: compactMaxLines) }
-                }
-                if let status = model.compactStatus {
-                    Text(status)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Layout") {
-                Toggle("Compact message layout", isOn: $compactLayout)
-                Text("Use compact layout for tighter spacing and smaller bubble padding.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    private var modelsPane: some View {
+    private var connectionsPane: some View {
         Form {
             Section("API Connections") {
                 AuthProfilesEditor(
@@ -139,13 +87,41 @@ struct SettingsView: View {
                 }
             }
 
-            DisclosureGroup("Advanced") {
-                Text("Availability depends on gateway auth and provider status.")
+            Section("Gateway") {
+                LabeledContent("Status", value: model.connectionStatusText)
+                if let detail = model.connectionStatusDetail {
+                    LabeledContent("Session", value: detail)
+                }
+                Button("Reconnect") {
+                    Task { await model.refreshAll() }
+                }
+                .keyboardShortcut("r", modifiers: [.command])
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var chatPane: some View {
+        Form {
+            Section("Chat History") {
+                Stepper(value: $compactMaxLines, in: 100...2000, step: 50) {
+                    LabeledContent("Compact target", value: "\(compactMaxLines) lines")
+                }
+                Button("Compact current session") {
+                    Task { await model.compactSession(maxLines: compactMaxLines) }
+                }
+                if let status = model.compactStatus {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Layout") {
+                Toggle("Compact message layout", isOn: $compactLayout)
+                Text("Use compact layout for tighter spacing and smaller bubble padding.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button("Reload models") {
-                    Task { await model.refreshModels() }
-                }
             }
         }
         .formStyle(.grouped)
@@ -172,10 +148,10 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    private var configPane: some View {
-        Form {
-            Section("Advanced Config") {
-                DisclosureGroup("Config file") {
+    private var advancedPane: some View {
+        VStack(spacing: 12) {
+            Form {
+                Section("Config file") {
                     ConfigUIEditor(
                         draft: model.configDraft,
                         error: model.configDraftError,
@@ -205,21 +181,23 @@ struct SettingsView: View {
                     .padding(.top, 4)
                 }
             }
+            .formStyle(.grouped)
+
+            workspaceDocsPane
         }
-        .formStyle(.grouped)
         .task {
             await model.refreshConfigFiles()
         }
     }
 
-    private var docsPane: some View {
+    private var workspaceDocsPane: some View {
         VStack(spacing: 12) {
             DocSegmentedPicker(selection: $workspaceDocSelection, docs: workspaceDocs)
                 .padding(.horizontal)
                 .padding(.top, 8)
 
             Form {
-                Section {
+                Section("Workspace Docs") {
                     ConfigFileEditor(
                         title: selectedWorkspaceDoc?.title ?? "Workspace Doc",
                         subtitle: model.workspaceDocPath,
@@ -245,48 +223,9 @@ struct SettingsView: View {
         }
     }
 
-    private var selectedModelChoice: ModelChoice? {
-        guard !preferredModelId.isEmpty else { return nil }
-        return model.models.first { $0.id == preferredModelId }
-    }
-
     private var pickerModels: [ModelChoice] {
         var seen = Set<String>()
         return model.models.filter { seen.insert($0.id).inserted }
-    }
-
-    private var defaultModelRef: String {
-        modelRef(provider: model.defaultModelProvider, id: model.defaultModelId) ?? "Unavailable"
-    }
-
-    private var sessionModelRef: String {
-        modelRef(provider: model.sessionModelProvider, id: model.sessionModelId) ?? "Not yet used"
-    }
-
-    private var defaultModelName: String? {
-        modelName(provider: model.defaultModelProvider, id: model.defaultModelId)
-    }
-
-    private var sessionModelName: String? {
-        modelName(provider: model.sessionModelProvider, id: model.sessionModelId)
-    }
-
-    private func modelRef(provider: String?, id: String?) -> String? {
-        guard let id, !id.isEmpty else { return nil }
-        if let provider, !provider.isEmpty {
-            return "\(provider)/\(id)"
-        }
-        return id
-    }
-
-    private func modelName(provider: String?, id: String?) -> String? {
-        guard let id, !id.isEmpty else { return nil }
-        let match = model.models.first {
-            $0.id == id && (provider == nil || $0.provider == provider)
-        }
-        guard let match else { return nil }
-        let display = modelDisplayName(match)
-        return display == id ? nil : display
     }
 
     private func modelDisplayName(_ choice: ModelChoice) -> String {
