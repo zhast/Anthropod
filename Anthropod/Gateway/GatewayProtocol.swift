@@ -288,6 +288,9 @@ nonisolated struct GatewaySessionRow: Decodable, Sendable {
     nonisolated let modelProvider: String?
     nonisolated let model: String?
     nonisolated let contextTokens: Int?
+    nonisolated let inputTokens: Int?
+    nonisolated let outputTokens: Int?
+    nonisolated let totalTokens: Int?
 }
 
 @preconcurrency

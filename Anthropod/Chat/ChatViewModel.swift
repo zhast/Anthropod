@@ -33,6 +33,23 @@ final class ChatViewModel {
     /// Streaming assistant text (not persisted)
     var streamingAssistantText: String?
 
+    /// Gateway status snapshot
+    var sessionModelProvider: String?
+    var sessionModelId: String?
+    var defaultModelProvider: String?
+    var defaultModelId: String?
+    var sessionContextTokens: Int?
+    var defaultContextTokens: Int?
+    var sessionInputTokens: Int?
+    var sessionOutputTokens: Int?
+    var sessionTotalTokens: Int?
+    var statusError: String?
+    var statusLastUpdated: Date?
+    var connectionModeLabel: String?
+    var restartModeLabel: String?
+    private var modelNamesById: [String: String] = [:]
+    private var runStatus: RunStatus?
+
     /// Local ordering for new messages before history refresh
     private var nextSortIndex: Int = 0
 
@@ -70,11 +87,26 @@ final class ChatViewModel {
         if isConnected {
             await resumeGatewaySession()
             await applyPreferredModelIfNeeded()
+            await refreshStatusSnapshot()
         }
     }
 
     func debugReport() async -> String {
         await gateway.debugReport()
+    }
+
+    func restartGateway() async {
+        isConnecting = true
+        await gateway.restartGateway()
+        isConnecting = gateway.isConnecting
+        isConnected = gateway.isConnected
+        if let error = gateway.connectionError, !error.isEmpty {
+            recordError(error, showAlert: true)
+        }
+        if isConnected {
+            await resumeGatewaySession()
+            await refreshStatusSnapshot()
+        }
     }
 
     // MARK: - Actions
@@ -96,6 +128,7 @@ final class ChatViewModel {
 
         // Set loading state
         isLoading = true
+        runStatus = .running
         errorMessage = nil
 
         // Send to gateway
@@ -129,6 +162,7 @@ final class ChatViewModel {
             streamingAssistantText = nil
             isLoading = false
             currentRunId = nil
+            runStatus = nil
         } catch {
             recordError(error.localizedDescription)
         }
@@ -267,11 +301,17 @@ final class ChatViewModel {
         if let content = event.content, !content.isEmpty {
             streamingAssistantText = content
         }
+        if event.isStreaming {
+            runStatus = .streaming
+        }
         if event.isComplete {
             isLoading = false
             currentRunId = nil
             if let error = event.error, !error.isEmpty {
                 recordError(error)
+                runStatus = .error(error)
+            } else {
+                runStatus = nil
             }
         }
     }
@@ -281,12 +321,18 @@ final class ChatViewModel {
         if !event.sessionKey.isEmpty, event.sessionKey != gatewaySessionKey {
             gatewaySessionKey = event.sessionKey
             currentSessionId = stableSessionId(for: event.sessionKey)
-            Task { await applyPreferredModelIfNeeded() }
+            Task {
+                await applyPreferredModelIfNeeded()
+                await refreshStatusSnapshot()
+            }
         }
 
         if event.isComplete {
             if let error = event.errorMessage, !error.isEmpty {
                 recordError(error)
+                runStatus = .error(error)
+            } else {
+                runStatus = nil
             }
             streamingAssistantText = nil
             isLoading = false
@@ -302,6 +348,9 @@ final class ChatViewModel {
         let isAssistant = stream == "assistant" || stream.hasPrefix("assistant.")
         if isAssistant, let text = event.text ?? event.rawText {
             streamingAssistantText = text
+            if runStatus == nil || runStatus == .running {
+                runStatus = .streaming
+            }
         }
     }
 
@@ -333,6 +382,194 @@ final class ChatViewModel {
             lastAppliedSessionKey = sessionKey
         } catch {
             recordError(error.localizedDescription)
+        }
+    }
+
+    func compactConversation() async {
+        let key = activeSessionKey
+        guard !key.isEmpty else { return }
+        do {
+            try await gateway.compactSession(sessionKey: key)
+            await resumeGatewaySession(sessionKey: key)
+        } catch {
+            recordError(error.localizedDescription)
+        }
+    }
+
+    func refreshStatusSnapshot() async {
+        let key = activeSessionKey
+        guard !key.isEmpty else { return }
+        let endpoint = await GatewayEndpointStore.shared.resolve(
+            fallbackHost: gateway.gatewayHost,
+            fallbackPort: gateway.gatewayPort
+        )
+        let host = endpoint.url.host?.lowercased() ?? ""
+        let isLocal = host == "127.0.0.1" || host == "localhost" || host == "::1"
+        connectionModeLabel = isLocal ? "Local" : "Remote"
+        restartModeLabel = isLocal ? "Process restart" : "Reconnect only"
+
+        do {
+            let snapshot = try await gateway.sessionModelSnapshot(sessionKey: key)
+            sessionModelProvider = snapshot.sessionProvider
+            sessionModelId = snapshot.sessionModel
+            sessionContextTokens = snapshot.sessionContextTokens
+            sessionInputTokens = snapshot.sessionInputTokens
+            sessionOutputTokens = snapshot.sessionOutputTokens
+            sessionTotalTokens = snapshot.sessionTotalTokens
+            defaultModelProvider = snapshot.defaultProvider
+            defaultModelId = snapshot.defaultModel
+            defaultContextTokens = snapshot.defaultContextTokens
+            await refreshModelNames(for: [sessionModelId, defaultModelId])
+            statusError = nil
+            statusLastUpdated = Date()
+        } catch {
+            statusError = error.localizedDescription
+        }
+    }
+
+    var activeSessionKey: String {
+        if let key = gatewaySessionKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !key.isEmpty
+        {
+            return key
+        }
+        return gateway.mainSessionKey
+    }
+
+    var effectiveModelLabel: String {
+        displayName(for: effectiveModelId)
+            ?? formatModelLabel(
+                provider: effectiveModelProvider,
+                model: effectiveModelId,
+                short: false
+            )
+            ?? "Unknown model"
+    }
+
+    var sessionModelLabel: String? {
+        displayName(for: sessionModelId)
+            ?? formatModelLabel(
+                provider: sessionModelProvider,
+                model: sessionModelId,
+                short: false
+            )
+    }
+
+    var defaultModelLabel: String? {
+        displayName(for: defaultModelId)
+            ?? formatModelLabel(
+                provider: defaultModelProvider,
+                model: defaultModelId,
+                short: false
+            )
+    }
+
+    var effectiveModelShortLabel: String? {
+        formatModelLabel(
+            provider: effectiveModelProvider,
+            model: effectiveModelId,
+            short: true
+        )
+    }
+
+    var effectiveContextTokens: Int? {
+        sessionContextTokens ?? defaultContextTokens
+    }
+
+    var contextRemainingTokens: Int? {
+        guard let context = effectiveContextTokens, context > 0 else { return nil }
+        let total = sessionTotalTokens ?? 0
+        return max(0, context - total)
+    }
+
+    var contextRemainingPercent: Int? {
+        guard let context = effectiveContextTokens, context > 0, let total = sessionTotalTokens else { return nil }
+        let used = min(context, max(0, total))
+        let remaining = context - used
+        return Int(round((Double(remaining) / Double(context)) * 100))
+    }
+
+    var runStatusLabel: String? {
+        switch runStatus {
+        case .running:
+            return "Running"
+        case .streaming:
+            return "Streaming"
+        case .error:
+            return "Error"
+        case .none:
+            return nil
+        }
+    }
+
+    private var effectiveModelProvider: String? {
+        if let session = sessionModelId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !session.isEmpty
+        {
+            return sessionModelProvider
+        }
+        return defaultModelProvider
+    }
+
+    private var effectiveModelId: String? {
+        if let session = sessionModelId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !session.isEmpty
+        {
+            return session
+        }
+        return defaultModelId
+    }
+
+    private func formatModelLabel(provider: String?, model: String?, short: Bool) -> String? {
+        guard let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let trimmedProvider = provider?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelLabel: String
+        if short, let suffix = trimmedModel.split(separator: "/").last {
+            modelLabel = String(suffix)
+        } else {
+            modelLabel = trimmedModel
+        }
+        if let providerValue = trimmedProvider, !providerValue.isEmpty {
+            return "\(providerValue) • \(modelLabel)"
+        }
+        return modelLabel
+    }
+
+    private enum RunStatus: Equatable {
+        case running
+        case streaming
+        case error(String)
+    }
+
+    private func displayName(for modelId: String?) -> String? {
+        guard let modelId else { return nil }
+        let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return modelNamesById[trimmed]
+    }
+
+    private func refreshModelNames(for ids: [String?]) async {
+        let needed = ids.compactMap { id -> String? in
+            guard let id else { return nil }
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return trimmed
+        }
+        guard !needed.isEmpty else { return }
+        let missing = needed.filter { modelNamesById[$0] == nil }
+        guard !missing.isEmpty else { return }
+        do {
+            let models = try await gateway.modelsList()
+            var map = modelNamesById
+            for model in models {
+                map[model.id] = model.name
+            }
+            modelNamesById = map
+        } catch {
+            // Leave labels as-is if models list is unavailable.
         }
     }
 

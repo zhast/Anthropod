@@ -58,6 +58,9 @@ final class GatewayService {
             connectionError = "Gateway did not become ready"
             isConnected = false
             isConnecting = false
+            if !suppressAutoReconnect {
+                scheduleReconnect()
+            }
             return
         }
 
@@ -86,6 +89,9 @@ final class GatewayService {
         }
 
         isConnecting = false
+        if !isConnected && !suppressAutoReconnect {
+            scheduleReconnect()
+        }
     }
 
     func disconnect() async {
@@ -95,6 +101,33 @@ final class GatewayService {
         isConnected = false
         connectionError = nil
         suppressAutoReconnect = false
+    }
+
+    func restartGateway() async {
+        suppressAutoReconnect = true
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        await client?.disconnect()
+        client = nil
+        isConnected = false
+        isConnecting = false
+        connectionError = nil
+
+        let endpoint = await GatewayEndpointStore.shared.resolve(
+            fallbackHost: gatewayHost,
+            fallbackPort: gatewayPort
+        )
+        let host = endpoint.url.host?.lowercased() ?? ""
+        let isLocal = host == "127.0.0.1" || host == "localhost" || host == "::1"
+        if isLocal {
+            let processManager = GatewayProcessManager.shared
+            processManager.setActive(false)
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            processManager.setActive(true)
+        }
+
+        suppressAutoReconnect = false
+        await connect()
     }
 
     private func handleClientDisconnect(_ error: Error?) async {
@@ -217,6 +250,9 @@ final class GatewayService {
         let sessionProvider: String?
         let sessionModel: String?
         let sessionContextTokens: Int?
+        let sessionInputTokens: Int?
+        let sessionOutputTokens: Int?
+        let sessionTotalTokens: Int?
     }
 
     func sessionModelSnapshot(sessionKey: String? = nil) async throws -> SessionModelSnapshot {
@@ -240,7 +276,10 @@ final class GatewayService {
             defaultContextTokens: payload.defaults.contextTokens,
             sessionProvider: match?.modelProvider,
             sessionModel: match?.model,
-            sessionContextTokens: match?.contextTokens
+            sessionContextTokens: match?.contextTokens,
+            sessionInputTokens: match?.inputTokens,
+            sessionOutputTokens: match?.outputTokens,
+            sessionTotalTokens: match?.totalTokens
         )
     }
 

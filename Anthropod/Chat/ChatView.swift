@@ -15,9 +15,6 @@ struct ChatView: View {
 
     @State private var viewModel = ChatViewModel()
     @State private var scrolledToBottom = true
-    @State private var showDebugOverlay = false
-    @State private var debugReport = ""
-    @State private var didCopyDebug = false
     @State private var expandedGroupIds: Set<UUID> = []
     @AppStorage(AnthropodDefaults.compactLayout) private var compactLayout = false
 
@@ -34,9 +31,6 @@ struct ChatView: View {
                 connectionOverlay
             }
 
-            if showDebugOverlay {
-                debugOverlay
-            }
         }
         .frame(
             minWidth: LiquidGlass.Window.minWidth,
@@ -44,21 +38,7 @@ struct ChatView: View {
         )
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                connectionStatusPill
-            }
-            if showDebugButton {
-                ToolbarItem(placement: .automatic) {
-                    Button {
-                        Task {
-                            debugReport = await viewModel.debugReport()
-                            showDebugOverlay = true
-                        }
-                    } label: {
-                        Image(systemName: "ladybug")
-                    }
-                    .keyboardShortcut("d", modifiers: [.command, .option])
-                    .help("Show connection debug info")
-                }
+                statusMenu
             }
         }
         .onAppear {
@@ -72,14 +52,6 @@ struct ChatView: View {
             set: { if !$0 { viewModel.clearError() } }
         )) {
             Button("OK") { viewModel.clearError() }
-            if showDebugButton {
-                Button("Debug") {
-                    Task {
-                        debugReport = await viewModel.debugReport()
-                        showDebugOverlay = true
-                    }
-                }
-            }
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
@@ -327,14 +299,6 @@ struct ChatView: View {
         return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var showDebugButton: Bool {
-#if DEBUG
-        return true
-#else
-        return false
-#endif
-    }
-
     // MARK: - Input Bar
 
     private var inputBar: some View {
@@ -375,18 +339,13 @@ struct ChatView: View {
 
     // MARK: - Connection Status
 
-    private var connectionStatusPill: some View {
+    private var connectionIndicator: some View {
         let status = connectionStatus
-        return HStack(spacing: 6) {
-            Circle()
-                .fill(status.color)
-                .frame(width: 6, height: 6)
-            Text(status.title)
-                .font(.caption)
-                .foregroundStyle(status.color)
-        }
-        .padding(.horizontal, 6)
-        .animation(LiquidGlass.Animation.quick, value: status.title)
+        return Circle()
+            .fill(status.color)
+            .frame(width: 7, height: 7)
+            .accessibilityLabel(status.title)
+            .animation(LiquidGlass.Animation.quick, value: status.title)
     }
 
     private var connectionStatus: (title: String, color: Color) {
@@ -412,61 +371,87 @@ struct ChatView: View {
         .background(.ultraThinMaterial)
     }
 
-    private var debugOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.25)
-                .ignoresSafeArea()
-
-            VStack(alignment: .leading, spacing: LiquidGlass.Spacing.md) {
-                HStack {
-                    Text("Gateway Debug Info")
-                        .font(.headline)
-                    Spacer()
-                    Button("Refresh") {
-                        Task {
-                            debugReport = await viewModel.debugReport()
-                        }
-                    }
-                    Button("Copy") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(debugReport, forType: .string)
-                        didCopyDebug = true
-                        Task {
-                            try? await Task.sleep(nanoseconds: 1_000_000_000)
-                            didCopyDebug = false
-                        }
-                    }
-                    Button("Close") {
-                        showDebugOverlay = false
-                    }
+    private var statusMenu: some View {
+        Menu {
+            Section("Connection") {
+                Text("Status: \(connectionStatus.title)")
+                if let mode = viewModel.connectionModeLabel {
+                    Text("Mode: \(mode)")
                 }
-
-                if didCopyDebug {
-                    Text("Copied to clipboard")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if let restartMode = viewModel.restartModeLabel {
+                    Text("Restart: \(restartMode)")
                 }
-
-                ScrollView {
-                    Text(debugReport.isEmpty ? "No debug info yet." : debugReport)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, LiquidGlass.Spacing.sm)
+                if let runStatus = viewModel.runStatusLabel {
+                    Text("Run: \(runStatus)")
                 }
-                .frame(maxWidth: .infinity, maxHeight: 320)
-                .background(Color.black.opacity(0.05))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .padding(LiquidGlass.Spacing.lg)
-            .frame(maxWidth: 640)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(Color.black.opacity(0.05))
-            )
+
+            Section("Model") {
+                Text(viewModel.effectiveModelLabel)
+                if let remaining = viewModel.contextRemainingTokens {
+                    if let percent = viewModel.contextRemainingPercent {
+                        Text("Context left: \(formatTokens(remaining)) (\(percent)%)")
+                    } else {
+                        Text("Context left: \(formatTokens(remaining))")
+                    }
+                } else if let context = viewModel.effectiveContextTokens {
+                    Text("Context: \(formatTokens(context)) tokens")
+                }
+            }
+
+            Section("Session") {
+                Text("Key: \(viewModel.activeSessionKey)")
+                if let updated = viewModel.statusLastUpdated {
+                    Text("Updated: \(updated, style: .time)")
+                }
+                if let error = viewModel.statusError, !error.isEmpty {
+                    Text("Status error: \(error)")
+                }
+            }
+
+            Divider()
+            Button("Refresh status") {
+                Task { await viewModel.refreshStatusSnapshot() }
+            }
+            Button("Compact conversation") {
+                Task { await viewModel.compactConversation() }
+            }
+            Button("Restart agent") {
+                Task { await viewModel.restartGateway() }
+            }
+            Button("Reconnect") {
+                Task { await viewModel.connectToGateway() }
+            }
+        } label: {
+            statusMenuLabel
         }
+        .menuIndicator(.hidden)
+        .help("Connection and model status")
+    }
+
+    private var statusMenuLabel: some View {
+        Image(systemName: "fossil.shell")
+            .font(.title3)
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(.secondary)
+            .overlay(alignment: .topTrailing) {
+                connectionIndicator
+                    .overlay {
+                        Circle()
+                            .strokeBorder(.white.opacity(0.9), lineWidth: 1)
+                    }
+                    .offset(x: 4, y: -4)
+            }
+            .padding(.horizontal, 6)
+            .accessibilityLabel("Status menu")
+    }
+
+    private func formatTokens(_ tokens: Int) -> String {
+        if tokens >= 1000 {
+            let value = Double(tokens) / 1000
+            return String(format: "%.0fk", value)
+        }
+        return "\(tokens)"
     }
 
     private var layout: ChatLayout {
