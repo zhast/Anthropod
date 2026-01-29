@@ -15,6 +15,7 @@ final class SettingsViewModel {
     var models: [ModelChoice] = []
     var isLoadingModels = false
     var modelError: String?
+    var authCheckStatus: String?
     var defaultModelProvider: String?
     var defaultModelId: String?
     var defaultModelContextTokens: Int?
@@ -42,6 +43,15 @@ final class SettingsViewModel {
     var agentsOriginalText = ""
     var isLoadingAgents = false
     var agentsError: String?
+    var authProfilesPath: String?
+    var authProfilesText = ""
+    var authProfilesOriginalText = ""
+    var isLoadingAuthProfiles = false
+    var authProfilesError: String?
+    var authProfilesDraft: AuthProfilesDraft?
+    var authProfilesDraftError: String?
+    var authProfilesDraftOriginal: AuthProfilesDraft?
+    private var authProfilesDocument: [String: Any] = [:]
     var workspaceDocPath: String?
     var workspaceDocText = ""
     var workspaceDocOriginalText = ""
@@ -73,6 +83,17 @@ final class SettingsViewModel {
         } catch {
             modelError = error.localizedDescription
             models = []
+        }
+    }
+
+    func verifyAuthProfiles() async {
+        await refreshModels()
+        if let error = modelError, !error.isEmpty {
+            authCheckStatus = "Auth check failed: \(error)"
+        } else if models.isEmpty {
+            authCheckStatus = "Auth check ok (no models returned)"
+        } else {
+            authCheckStatus = "Auth check ok (\(models.count) models)"
         }
     }
 
@@ -134,6 +155,7 @@ final class SettingsViewModel {
     func refreshConfigFiles() async {
         await loadConfigFile()
         await loadAgentsFile()
+        await loadAuthProfilesFile()
     }
 
     func loadConfigFile() async {
@@ -285,6 +307,117 @@ final class SettingsViewModel {
         agentsError = nil
     }
 
+    func loadAuthProfilesFile() async {
+        isLoadingAuthProfiles = true
+        authProfilesError = nil
+        defer { isLoadingAuthProfiles = false }
+
+        let url = ClawdbotPaths.authProfilesURL
+        authProfilesPath = url.path
+        if FileManager.default.fileExists(atPath: url.path) {
+            do {
+                let text = try String(contentsOf: url, encoding: .utf8)
+                let formatted = Self.prettyPrintedJson(from: text) ?? text
+                authProfilesText = formatted
+                authProfilesOriginalText = formatted
+                if let document = Self.jsonDocument(from: formatted) {
+                    authProfilesDocument = document
+                    let draft = Self.buildAuthProfilesDraft(from: document)
+                    authProfilesDraft = draft
+                    authProfilesDraftOriginal = draft
+                    authProfilesDraftError = nil
+                } else {
+                    authProfilesDraft = nil
+                    authProfilesDraftOriginal = nil
+                    authProfilesDraftError = "Auth profiles JSON is invalid."
+                }
+            } catch {
+                authProfilesError = "Unable to load auth profiles: \(error.localizedDescription)"
+                authProfilesText = ""
+                authProfilesOriginalText = ""
+                authProfilesDraft = nil
+                authProfilesDraftOriginal = nil
+                authProfilesDraftError = nil
+            }
+        } else {
+            authProfilesError = "File not found. Save to create it."
+            authProfilesText = ""
+            authProfilesOriginalText = ""
+            authProfilesDraft = AuthProfilesDraft(profiles: [])
+            authProfilesDraftOriginal = authProfilesDraft
+        }
+    }
+
+    func saveAuthProfilesFile() async {
+        let url = ClawdbotPaths.authProfilesURL
+        authProfilesPath = url.path
+        if let draft = authProfilesDraft {
+            var document = authProfilesDocument
+            Self.applyAuthProfilesDraft(draft, to: &document)
+            authProfilesDocument = document
+            if let formatted = Self.prettyPrintedJson(from: document) {
+                authProfilesText = formatted
+            }
+        }
+        guard let formatted = Self.prettyPrintedJson(from: authProfilesText) else {
+            authProfilesError = "Auth profiles JSON is invalid."
+            return
+        }
+        authProfilesText = formatted
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try authProfilesText.write(to: url, atomically: true, encoding: .utf8)
+            authProfilesOriginalText = authProfilesText
+            authProfilesDraftOriginal = authProfilesDraft
+            authProfilesError = nil
+            await gateway.disconnect()
+            await gateway.connect()
+            await refreshModelStatus()
+        } catch {
+            authProfilesError = "Unable to save auth profiles: \(error.localizedDescription)"
+        }
+    }
+
+    func revertAuthProfilesEdits() {
+        authProfilesText = authProfilesOriginalText
+        authProfilesError = nil
+        if let document = Self.jsonDocument(from: authProfilesOriginalText) {
+            authProfilesDocument = document
+            let draft = Self.buildAuthProfilesDraft(from: document)
+            authProfilesDraft = draft
+            authProfilesDraftOriginal = draft
+            authProfilesDraftError = nil
+        }
+    }
+
+    func updateAuthProfilesDraft(_ mutate: (inout AuthProfilesDraft) -> Void) {
+        guard var draft = authProfilesDraft else { return }
+        mutate(&draft)
+        if draft == authProfilesDraft {
+            return
+        }
+        authProfilesDraft = draft
+        syncAuthProfilesTextFromDraft(draft)
+    }
+
+    func clearAuthProfileUsage(profileId: String) {
+        var document = authProfilesDocument
+        if var usage = document["usageStats"] as? [String: Any] {
+            usage.removeValue(forKey: profileId)
+            document["usageStats"] = usage
+        }
+        authProfilesDocument = document
+        if let formatted = Self.prettyPrintedJson(from: document) {
+            authProfilesText = formatted
+        }
+        let draft = Self.buildAuthProfilesDraft(from: document)
+        authProfilesDraft = draft
+        authProfilesDraftOriginal = authProfilesDraftOriginal ?? draft
+    }
+
     var configDraftHasChanges: Bool {
         guard let configDraft, let configDraftOriginal else { return false }
         return configDraft != configDraftOriginal
@@ -428,6 +561,120 @@ extension SettingsViewModel {
         }
     }
 
+    private func syncAuthProfilesTextFromDraft(_ draft: AuthProfilesDraft) {
+        var document = authProfilesDocument
+        Self.applyAuthProfilesDraft(draft, to: &document)
+        authProfilesDocument = document
+        if let formatted = Self.prettyPrintedJson(from: document) {
+            authProfilesText = formatted
+        }
+    }
+
+    nonisolated static func buildAuthProfilesDraft(from document: [String: Any]) -> AuthProfilesDraft {
+        let profiles = (document["profiles"] as? [String: Any]) ?? [:]
+        let usage = (document["usageStats"] as? [String: Any]) ?? [:]
+        let drafts: [AuthProfileDraft] = profiles.compactMap { key, value in
+            guard let dict = value as? [String: Any] else { return nil }
+            let type = dict["type"] as? String ?? ""
+            let provider = dict["provider"] as? String ?? ""
+            let email = dict["email"] as? String ?? ""
+            let keyValue = dict["key"] as? String ?? ""
+            let token = dict["token"] as? String ?? ""
+            let access = dict["access"] as? String ?? ""
+            let refresh = dict["refresh"] as? String ?? ""
+            let expires = dict["expires"] as? Int ?? (dict["expires"] as? NSNumber).map { $0.intValue }
+
+            let knownKeys: Set<String> = [
+                "type", "provider", "email", "key", "token", "access", "refresh", "expires"
+            ]
+            let extras = dict.compactMap { entry -> AuthProfileExtraField? in
+                if knownKeys.contains(entry.key) { return nil }
+                let value: String
+                if let string = entry.value as? String {
+                    value = string
+                } else if let number = entry.value as? NSNumber {
+                    value = number.stringValue
+                } else if let bool = entry.value as? Bool {
+                    value = bool ? "true" : "false"
+                } else {
+                    return nil
+                }
+                return AuthProfileExtraField(key: entry.key, value: value)
+            }.sorted {
+                $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending
+            }
+
+            let usageEntry = usage[key] as? [String: Any]
+            let cooldownUntil = usageEntry?["cooldownUntil"] as? Int
+                ?? (usageEntry?["cooldownUntil"] as? NSNumber).map { $0.intValue }
+            let disabledUntil = usageEntry?["disabledUntil"] as? Int
+                ?? (usageEntry?["disabledUntil"] as? NSNumber).map { $0.intValue }
+            let disabledReason = usageEntry?["disabledReason"] as? String
+            let errorCount = usageEntry?["errorCount"] as? Int
+                ?? (usageEntry?["errorCount"] as? NSNumber).map { $0.intValue }
+            let lastFailureAt = usageEntry?["lastFailureAt"] as? Int
+                ?? (usageEntry?["lastFailureAt"] as? NSNumber).map { $0.intValue }
+
+            return AuthProfileDraft(
+                id: key,
+                type: type,
+                provider: provider,
+                email: email,
+                apiKey: keyValue,
+                token: token,
+                access: access,
+                refresh: refresh,
+                expires: expires,
+                cooldownUntil: cooldownUntil,
+                disabledUntil: disabledUntil,
+                disabledReason: disabledReason,
+                errorCount: errorCount,
+                lastFailureAt: lastFailureAt,
+                extraFields: extras
+            )
+        }
+        .sorted { $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending }
+
+        return AuthProfilesDraft(profiles: drafts)
+    }
+
+    nonisolated static func applyAuthProfilesDraft(_ draft: AuthProfilesDraft, to document: inout [String: Any]) {
+        var profiles: [String: Any] = [:]
+        for profile in draft.profiles {
+            let id = profile.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            if id.isEmpty { continue }
+
+            var dict: [String: Any] = [:]
+            if !profile.type.isEmpty { dict["type"] = profile.type }
+            if !profile.provider.isEmpty { dict["provider"] = profile.provider }
+            if !profile.email.isEmpty { dict["email"] = profile.email }
+
+            switch profile.type {
+            case "api_key":
+                if !profile.apiKey.isEmpty { dict["key"] = profile.apiKey }
+            case "token":
+                if !profile.token.isEmpty { dict["token"] = profile.token }
+            case "oauth":
+                if !profile.access.isEmpty { dict["access"] = profile.access }
+                if !profile.refresh.isEmpty { dict["refresh"] = profile.refresh }
+            default:
+                break
+            }
+
+            if let expires = profile.expires { dict["expires"] = expires }
+
+            for extra in profile.extraFields where !extra.key.isEmpty {
+                dict[extra.key] = extra.value
+            }
+
+            profiles[id] = dict
+        }
+        document["profiles"] = profiles
+        if document["version"] == nil {
+            document["version"] = 1
+        }
+    }
+
     nonisolated static func buildConfigDraft(from document: [String: Any]) -> ConfigDraft {
         let browser = (document["browser"] as? [String: Any]) ?? [:]
         let browserEnabled = browser["enabled"] as? Bool
@@ -552,5 +799,33 @@ extension SettingsViewModel {
         var workspace: String
         var maxConcurrent: Int?
         var authProfiles: [ConfigAuthProfile]
+    }
+
+    struct AuthProfileExtraField: Identifiable, Hashable {
+        let id = UUID()
+        var key: String
+        var value: String
+    }
+
+    struct AuthProfileDraft: Identifiable, Hashable {
+        var id: String
+        var type: String
+        var provider: String
+        var email: String
+        var apiKey: String
+        var token: String
+        var access: String
+        var refresh: String
+        var expires: Int?
+        var cooldownUntil: Int?
+        var disabledUntil: Int?
+        var disabledReason: String?
+        var errorCount: Int?
+        var lastFailureAt: Int?
+        var extraFields: [AuthProfileExtraField]
+    }
+
+    struct AuthProfilesDraft: Hashable {
+        var profiles: [AuthProfileDraft]
     }
 }

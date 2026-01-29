@@ -205,6 +205,24 @@ struct SettingsView: View {
                 }
                 .padding(.top, 4)
             }
+            Section("Credentials") {
+                AuthProfilesEditor(
+                    draft: model.authProfilesDraft,
+                    error: model.authProfilesDraftError ?? model.authProfilesError,
+                    hasChanges: model.authProfilesText != model.authProfilesOriginalText,
+                    onUpdate: { updated in
+                        model.updateAuthProfilesDraft { $0 = updated }
+                    },
+                    onClearUsage: { profileId in
+                        model.clearAuthProfileUsage(profileId: profileId)
+                    },
+                    onReload: { Task { await model.loadAuthProfilesFile() } },
+                    onRevert: { model.revertAuthProfilesEdits() },
+                    onSave: { Task { await model.saveAuthProfilesFile() } },
+                    onVerify: { Task { await model.verifyAuthProfiles() } },
+                    status: model.authCheckStatus
+                )
+            }
         }
         .formStyle(.grouped)
         .task {
@@ -586,6 +604,282 @@ private struct ConfigUIEditor: View {
             copy.modelFallbacks.append(fallback)
         }
         onUpdate(copy)
+    }
+}
+
+private struct AuthProfilesEditor: View {
+    let draft: SettingsViewModel.AuthProfilesDraft?
+    let error: String?
+    let hasChanges: Bool
+    let onUpdate: (SettingsViewModel.AuthProfilesDraft) -> Void
+    let onClearUsage: (String) -> Void
+    let onReload: () -> Void
+    let onRevert: () -> Void
+    let onSave: () -> Void
+    let onVerify: () -> Void
+    let status: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let error, !error.isEmpty {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 12) {
+                Button("Save") { onSave() }
+                    .disabled(!hasChanges)
+                Button("Revert") { onRevert() }
+                    .disabled(!hasChanges)
+                Button("Reload") { onReload() }
+                Button("Verify keys") { onVerify() }
+                if let status, !status.isEmpty {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let draft {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(draft.profiles.enumerated()), id: \.element.id) { index, profile in
+                        AuthProfileCard(
+                            profile: profile,
+                            onChange: { updated in
+                                var copy = draft
+                                if copy.profiles.indices.contains(index) {
+                                    copy.profiles[index] = updated
+                                }
+                                onUpdate(copy)
+                            },
+                            onDelete: {
+                                var copy = draft
+                                if copy.profiles.indices.contains(index) {
+                                    copy.profiles.remove(at: index)
+                                }
+                                onUpdate(copy)
+                            },
+                            onClearUsage: {
+                                onClearUsage(profile.id)
+                            }
+                        )
+                    }
+                }
+
+                Button("Add Profile") {
+                    var copy = draft
+                    copy.profiles.append(
+                        SettingsViewModel.AuthProfileDraft(
+                            id: "",
+                            type: "api_key",
+                            provider: "",
+                            email: "",
+                            apiKey: "",
+                            token: "",
+                            access: "",
+                            refresh: "",
+                            expires: nil,
+                            cooldownUntil: nil,
+                            disabledUntil: nil,
+                            disabledReason: nil,
+                            errorCount: nil,
+                            lastFailureAt: nil,
+                            extraFields: []
+                        )
+                    )
+                    onUpdate(copy)
+                }
+            } else {
+                Text("Auth profiles unavailable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct AuthProfileCard: View {
+    var profile: SettingsViewModel.AuthProfileDraft
+    let onChange: (SettingsViewModel.AuthProfileDraft) -> Void
+    let onDelete: () -> Void
+    let onClearUsage: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                TextField("Profile ID", text: binding(\.id))
+                    .textFieldStyle(.roundedBorder)
+                Picker("Type", selection: binding(\.type)) {
+                    Text("api_key").tag("api_key")
+                    Text("token").tag("token")
+                    Text("oauth").tag("oauth")
+                }
+                .pickerStyle(.menu)
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            HStack(spacing: 12) {
+                TextField("Provider", text: binding(\.provider))
+                    .textFieldStyle(.roundedBorder)
+                TextField("Email (optional)", text: binding(\.email))
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            if let status = usageStatusText() {
+                HStack(spacing: 8) {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Reset status") {
+                        onClearUsage()
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            switch profile.type {
+            case "api_key":
+                SecureField("API Key", text: binding(\.apiKey))
+                    .textFieldStyle(.roundedBorder)
+            case "token":
+                SecureField("Token", text: binding(\.token))
+                    .textFieldStyle(.roundedBorder)
+            case "oauth":
+                VStack(spacing: 8) {
+                    SecureField("Access Token", text: binding(\.access))
+                        .textFieldStyle(.roundedBorder)
+                    SecureField("Refresh Token", text: binding(\.refresh))
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Expires (ms since epoch)", text: expiresBinding())
+                        .textFieldStyle(.roundedBorder)
+                }
+            default:
+                EmptyView()
+            }
+
+            if !profile.extraFields.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Extra fields")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(profile.extraFields.indices, id: \.self) { index in
+                        HStack(spacing: 8) {
+                            TextField("Key", text: extraKeyBinding(index))
+                                .textFieldStyle(.roundedBorder)
+                            TextField("Value", text: extraValueBinding(index))
+                                .textFieldStyle(.roundedBorder)
+                            Button(role: .destructive) {
+                                removeExtraField(at: index)
+                            } label: {
+                                Image(systemName: "minus.circle")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+
+            Button("Add Field") {
+                var copy = profile
+                copy.extraFields.append(SettingsViewModel.AuthProfileExtraField(key: "", value: ""))
+                onChange(copy)
+            }
+        }
+        .padding(12)
+        .background(.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func binding(_ keyPath: WritableKeyPath<SettingsViewModel.AuthProfileDraft, String>) -> Binding<String> {
+        Binding(
+            get: { profile[keyPath: keyPath] },
+            set: { newValue in
+                var copy = profile
+                copy[keyPath: keyPath] = newValue
+                onChange(copy)
+            }
+        )
+    }
+
+    private func expiresBinding() -> Binding<String> {
+        Binding(
+            get: { profile.expires.map(String.init) ?? "" },
+            set: { newValue in
+                var copy = profile
+                if let value = Int(newValue) {
+                    copy.expires = value
+                } else if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    copy.expires = nil
+                }
+                onChange(copy)
+            }
+        )
+    }
+
+    private func extraKeyBinding(_ index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                guard profile.extraFields.indices.contains(index) else { return "" }
+                return profile.extraFields[index].key
+            },
+            set: { newValue in
+                guard profile.extraFields.indices.contains(index) else { return }
+                var copy = profile
+                copy.extraFields[index].key = newValue
+                onChange(copy)
+            }
+        )
+    }
+
+    private func extraValueBinding(_ index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                guard profile.extraFields.indices.contains(index) else { return "" }
+                return profile.extraFields[index].value
+            },
+            set: { newValue in
+                guard profile.extraFields.indices.contains(index) else { return }
+                var copy = profile
+                copy.extraFields[index].value = newValue
+                onChange(copy)
+            }
+        )
+    }
+
+    private func removeExtraField(at index: Int) {
+        guard profile.extraFields.indices.contains(index) else { return }
+        var copy = profile
+        copy.extraFields.remove(at: index)
+        onChange(copy)
+    }
+
+    private func usageStatusText() -> String? {
+        var parts: [String] = []
+        if let cooldownUntil = profile.cooldownUntil {
+            let date = Date(timeIntervalSince1970: Double(cooldownUntil) / 1000.0)
+            parts.append("Cooldown until \(date.formatted(date: .numeric, time: .shortened))")
+        }
+        if let disabledUntil = profile.disabledUntil {
+            let date = Date(timeIntervalSince1970: Double(disabledUntil) / 1000.0)
+            parts.append("Disabled until \(date.formatted(date: .numeric, time: .shortened))")
+        }
+        if let disabledReason = profile.disabledReason, !disabledReason.isEmpty {
+            parts.append("Disabled: \(disabledReason)")
+        }
+        if let errorCount = profile.errorCount, errorCount > 0 {
+            parts.append("Errors: \(errorCount)")
+        }
+        if let lastFailureAt = profile.lastFailureAt {
+            let date = Date(timeIntervalSince1970: Double(lastFailureAt) / 1000.0)
+            parts.append("Last failure \(date.formatted(date: .numeric, time: .shortened))")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 

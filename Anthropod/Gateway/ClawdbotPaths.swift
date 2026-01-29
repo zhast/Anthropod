@@ -20,10 +20,14 @@ enum ClawdbotEnv {
 enum ClawdbotPaths {
     nonisolated private static let configPathEnv = ["MOLTBOT_CONFIG_PATH", "CLAWDBOT_CONFIG_PATH"]
     nonisolated private static let stateDirEnv = ["MOLTBOT_STATE_DIR", "CLAWDBOT_STATE_DIR"]
+    nonisolated private static let agentDirEnv = ["CLAWDBOT_AGENT_DIR", "PI_CODING_AGENT_DIR"]
     nonisolated private static let newStateDirName = ".moltbot"
     nonisolated private static let legacyStateDirName = ".clawdbot"
     nonisolated private static let configFilename = "moltbot.json"
     nonisolated private static let legacyConfigFilename = "clawdbot.json"
+    nonisolated private static let defaultAgentId = "main"
+    nonisolated private static let authProfileFilename = "auth-profiles.json"
+    nonisolated private static let legacyAuthProfileFilename = "auth.json"
 
     nonisolated static var stateDirURL: URL {
         if let override = ClawdbotEnv.path(firstOf: self.stateDirEnv) {
@@ -53,6 +57,28 @@ enum ClawdbotPaths {
 
     nonisolated static var agentsURL: URL {
         stateDirURL.appendingPathComponent("agents.md")
+    }
+
+    nonisolated static var agentDirURL: URL {
+        if let override = ClawdbotEnv.path(firstOf: agentDirEnv) {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return stateDirURL
+            .appendingPathComponent("agents", isDirectory: true)
+            .appendingPathComponent(defaultAgentId, isDirectory: true)
+            .appendingPathComponent("agent", isDirectory: true)
+    }
+
+    nonisolated static var authProfilesURL: URL {
+        let primary = agentDirURL.appendingPathComponent(authProfileFilename)
+        if FileManager.default.fileExists(atPath: primary.path) {
+            return primary
+        }
+        let legacy = agentDirURL.appendingPathComponent(legacyAuthProfileFilename)
+        if FileManager.default.fileExists(atPath: legacy.path) {
+            return legacy
+        }
+        return primary
     }
 
     nonisolated private static func configCandidates() -> [URL] {
