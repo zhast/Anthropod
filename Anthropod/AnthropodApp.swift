@@ -10,6 +10,12 @@ import SwiftData
 
 @main
 struct AnthropodApp: App {
+    init() {
+        Task {
+            await GatewayService.shared.connect()
+        }
+    }
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Message.self,

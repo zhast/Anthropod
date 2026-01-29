@@ -74,6 +74,19 @@ final class ChatViewModel {
     // MARK: - Connection
 
     func connectToGateway() async {
+        if gateway.isConnected {
+            isConnecting = false
+            isConnected = true
+            if let error = gateway.connectionError, !error.isEmpty {
+                recordError(error, showAlert: true)
+                return
+            }
+            await resumeGatewaySession()
+            await applyPreferredModelIfNeeded()
+            await refreshStatusSnapshot()
+            return
+        }
+
         isConnecting = true
         await gateway.connect()
         isConnected = gateway.isConnected
